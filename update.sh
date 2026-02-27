@@ -10,7 +10,7 @@ err()  { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 INSTALL_DIR="/opt/nimbusos"
 BACKUP_DIR="/tmp/nimbusos-backup-$(date +%Y%m%d-%H%M%S)"
-TARBALL_URL="https://github.com/andresgv-beep/nimbusos/archive/refs/heads/master.tar.gz"
+TARBALL_URL="https://github.com/andresgv-beep/nimbus-os-beta-1/archive/refs/heads/main.tar.gz"
 
 [[ $EUID -ne 0 ]] && { err "Run with sudo"; exit 1; }
 [[ ! -d "$INSTALL_DIR/server" ]] && { err "NimbusOS not found at $INSTALL_DIR"; exit 1; }

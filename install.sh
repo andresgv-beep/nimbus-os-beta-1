@@ -10,7 +10,7 @@ set -euo pipefail
 # ── Config ──
 NIMBUS_VERSION="1.0.0"
 NIMBUS_REPO="https://github.com/nimbusos-project/nimbusos.git"
-NIMBUS_BRANCH="master"
+NIMBUS_BRANCH="main"
 INSTALL_DIR="/opt/nimbusos"
 DATA_DIR="/var/lib/nimbusos"
 CONFIG_DIR="/etc/nimbusos"
@@ -179,7 +179,7 @@ install_nimbusos() {
   step "Installing NimbusOS application"
 
   # Download via tarball (no git auth needed)
-  TARBALL_URL="https://github.com/andresgv-beep/nimbusos/archive/refs/heads/${NIMBUS_BRANCH}.tar.gz"
+  TARBALL_URL="https://github.com/andresgv-beep/nimbus-os-beta-1/archive/refs/heads/${NIMBUS_BRANCH}.tar.gz"
   
   if [[ -d "$INSTALL_DIR/server" ]]; then
     log "Updating existing installation..."
