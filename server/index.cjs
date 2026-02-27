@@ -4031,7 +4031,7 @@ const server = http.createServer((req, res) => {
         const cacheControl = ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable';
         
         const data = fs.readFileSync(filePath);
-        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': cacheControl, ...CORS_HEADERS });
+        res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': contentType, 'Cache-Control': cacheControl });
         return res.end(data);
       }
     }
@@ -4041,7 +4041,7 @@ const server = http.createServer((req, res) => {
     if (fs.existsSync(pubFile) && pubFile.startsWith(PUBLIC_DIR) && !fs.statSync(pubFile).isDirectory()) {
       const ext = path.extname(pubFile).toLowerCase();
       const ct = ext === '.svg' ? 'image/svg+xml' : ext === '.png' ? 'image/png' : 'application/octet-stream';
-      res.writeHead(200, { 'Content-Type': ct, ...CORS_HEADERS });
+      res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': ct });
       return res.end(fs.readFileSync(pubFile));
     }
     
