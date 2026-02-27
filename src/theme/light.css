@@ -1,0 +1,39 @@
+/* ═══════════════════════════════════
+   NimbusOS Light Theme
+   Warm cream — inspired by macOS
+   ═══════════════════════════════════ */
+
+[data-theme='light'] {
+  --bg-desktop: #e8e4df;
+  --bg-window: rgba(248, 244, 240, 0.92);
+  --bg-sidebar: rgba(215, 208, 200, 0.45);
+  --bg-card: rgba(0, 0, 0, 0.04);
+  --bg-input: rgba(0, 0, 0, 0.05);
+  --bg-hover: rgba(0, 0, 0, 0.06);
+  --bg-active: rgba(0, 0, 0, 0.10);
+  --bg-tooltip: #ece8e3;
+  --bg-dropdown: rgba(248, 244, 240, 0.95);
+  --bg-dropdown-hover: rgba(0, 0, 0, 0.05);
+  --bg-overlay: rgba(0, 0, 0, 0.25);
+  --bg-glass: rgba(248, 244, 240, 0.78);
+  --bg-taskbar: rgba(235, 230, 224, 0.72);
+  --bg-topbar: rgba(240, 236, 230, 0.78);
+
+  --text-primary: #1d1b19;
+  --text-secondary: #5c564f;
+  --text-muted: #8c8479;
+  --text-inverse: #f5f2ef;
+
+  --border: rgba(0, 0, 0, 0.12);
+  --border-light: rgba(0, 0, 0, 0.08);
+  --border-focus: var(--nimbus-orange);
+
+  --accent: var(--nimbus-orange);
+  --accent-hover: var(--nimbus-orange-hover);
+  --accent-active: var(--nimbus-orange-active);
+  --accent-glow: rgba(233, 84, 32, 0.15);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.10);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.18);
+}
