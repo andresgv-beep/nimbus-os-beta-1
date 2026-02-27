@@ -197,11 +197,11 @@ function InterfacesPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td className={styles.cellName}>eth0</td>
-                  <td className={styles.mono}>192.168.1.100</td>
+                  <td className={styles.cellName}>—</td>
                   <td className={styles.mono}>—</td>
-                  <td>1 Gbps</td>
-                  <td><span className={`${styles.badge} ${styles.badgeGood}`}>Connected</span></td>
+                  <td className={styles.mono}>—</td>
+                  <td>—</td>
+                  <td><span className={styles.badge}>No interfaces detected</span></td>
                 </tr>
               )}
             </tbody>
@@ -339,13 +339,13 @@ function ProxyPage() {
           <tbody>
             <tr>
               <td className={styles.cellName}>nas.example.duckdns.org</td>
-              <td className={styles.mono}>localhost:5000</td>
+              <td className={styles.mono}>{window.location.host}</td>
               <td><span className={`${styles.badge} ${styles.badgeGood}`}>Let's Encrypt</span></td>
               <td><span className={`${styles.badge} ${styles.badgeGood}`}>Active</span></td>
             </tr>
             <tr>
               <td className={styles.cellName}>cloud.example.duckdns.org</td>
-              <td className={styles.mono}>localhost:8080</td>
+              <td className={styles.mono}>{window.location.hostname}:8080</td>
               <td><span className={`${styles.badge} ${styles.badgeGood}`}>Let's Encrypt</span></td>
               <td><span className={`${styles.badge} ${styles.badgeGood}`}>Active</span></td>
             </tr>
