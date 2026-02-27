@@ -280,8 +280,7 @@ PrivateTmp=true
 LimitNOFILE=65535
 LimitNPROC=4096
 
-# Watchdog
-WatchdogSec=30
+# No watchdog (Node.js doesn't implement sd_notify)
 
 [Install]
 WantedBy=multi-user.target
