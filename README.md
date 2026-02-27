@@ -33,7 +33,7 @@ Transform any Ubuntu Server into a powerful NAS with Docker container management
 One command on a fresh Ubuntu Server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nimbusos-project/nimbusos/main/install.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/andresgv-beep/nimbus-os-beta-1/main/install.sh | sudo bash
 ```
 
 This installs:
