@@ -19,7 +19,24 @@ const USERS_FILE = path.join(CONFIG_DIR, 'users.json');
 const SHARES_FILE = path.join(CONFIG_DIR, 'shares.json');
 const DOCKER_FILE = path.join(CONFIG_DIR, 'docker.json');
 const NATIVE_APPS_FILE = path.join(CONFIG_DIR, 'native-apps.json');
-const SESSIONS = {}; // in-memory sessions: token → { username, role, created }
+const SESSIONS_FILE = path.join(CONFIG_DIR, 'sessions.json');
+
+// Load sessions from disk (survive restarts)
+let SESSIONS = {};
+try {
+  if (fs.existsSync(SESSIONS_FILE)) {
+    SESSIONS = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+    // Clean expired on load
+    const now = Date.now();
+    Object.keys(SESSIONS).forEach(token => {
+      if (now - SESSIONS[token].created > 24 * 60 * 60 * 1000) delete SESSIONS[token];
+    });
+  }
+} catch { SESSIONS = {}; }
+
+function saveSessions() {
+  try { fs.writeFileSync(SESSIONS_FILE, JSON.stringify(SESSIONS, null, 2)); } catch {}
+}
 
 // Session expiry (24 hours)
 const SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
@@ -444,6 +461,7 @@ function handleAuth(url, method, body, req) {
     // Auto-login after setup
     const token = generateToken();
     SESSIONS[token] = { username: users[0].username, role: 'admin', created: Date.now() };
+    saveSessions();
 
     return { ok: true, token, user: { username: users[0].username, role: 'admin' } };
   }
@@ -461,6 +479,7 @@ function handleAuth(url, method, body, req) {
 
     const token = generateToken();
     SESSIONS[token] = { username: user.username, role: user.role, created: Date.now() };
+    saveSessions();
 
     return { ok: true, token, user: { username: user.username, role: user.role } };
   }
@@ -470,6 +489,7 @@ function handleAuth(url, method, body, req) {
     const auth = req.headers['authorization'] || '';
     const token = auth.replace('Bearer ', '');
     delete SESSIONS[token];
+    saveSessions();
     return { ok: true };
   }
 
