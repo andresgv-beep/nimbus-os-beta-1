@@ -4121,10 +4121,20 @@ const server = http.createServer((req, res) => {
           return res.end(JSON.stringify({ error: 'Update script not found' }));
         }
 
-        // Run update in background (it will restart the service)
-        exec(`bash "${updateScript}" >> /var/log/nimbusos/update.log 2>&1`, (err) => {
-          if (err) console.error('[Update] Error:', err.message);
+        // Ensure log directory exists
+        if (!fs.existsSync('/var/log/nimbusos')) {
+          fs.mkdirSync('/var/log/nimbusos', { recursive: true });
+        }
+
+        // Launch update fully detached from this process
+        // nohup + setsid ensures the script survives when systemctl kills Node
+        const { spawn } = require('child_process');
+        const logFile = fs.openSync('/var/log/nimbusos/update.log', 'a');
+        const child = spawn('setsid', ['bash', updateScript], {
+          detached: true,
+          stdio: ['ignore', logFile, logFile],
         });
+        child.unref();
 
         res.writeHead(200, CORS_HEADERS);
         return res.end(JSON.stringify({ ok: true, message: 'Update started. The service will restart shortly.' }));
