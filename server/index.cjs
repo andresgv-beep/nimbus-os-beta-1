@@ -4075,6 +4075,69 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── System Update routes ──
+  if (url.startsWith('/api/system/update')) {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') {
+      res.writeHead(401, CORS_HEADERS);
+      return res.end(JSON.stringify({ error: 'Unauthorized' }));
+    }
+
+    // GET /api/system/update/check — check for updates
+    if (url === '/api/system/update/check' && method === 'GET') {
+      try {
+        // Get current version from package.json
+        const pkgPath = path.join(__dirname, '..', 'package.json');
+        const currentPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+        const currentVersion = currentPkg.version || '0.0.0';
+
+        // Fetch latest package.json from GitHub
+        const repoUrl = 'https://raw.githubusercontent.com/andresgv-beep/nimbus-os-beta-1/main/package.json';
+        const remotePkg = execSync(`curl -fsSL "${repoUrl}" 2>/dev/null`, { timeout: 10000, encoding: 'utf8' });
+        const remote = JSON.parse(remotePkg);
+        const latestVersion = remote.version || '0.0.0';
+
+        const updateAvailable = latestVersion !== currentVersion;
+
+        res.writeHead(200, CORS_HEADERS);
+        return res.end(JSON.stringify({
+          currentVersion,
+          latestVersion,
+          updateAvailable,
+          installDir: '/opt/nimbusos'
+        }));
+      } catch (err) {
+        res.writeHead(200, CORS_HEADERS);
+        return res.end(JSON.stringify({ error: 'Failed to check: ' + err.message }));
+      }
+    }
+
+    // POST /api/system/update/apply — apply update
+    if (url === '/api/system/update/apply' && method === 'POST') {
+      try {
+        const updateScript = path.join(__dirname, '..', 'scripts', 'update.sh');
+        if (!fs.existsSync(updateScript)) {
+          res.writeHead(400, CORS_HEADERS);
+          return res.end(JSON.stringify({ error: 'Update script not found' }));
+        }
+
+        // Run update in background (it will restart the service)
+        exec(`bash "${updateScript}" >> /var/log/nimbusos/update.log 2>&1`, (err) => {
+          if (err) console.error('[Update] Error:', err.message);
+        });
+
+        res.writeHead(200, CORS_HEADERS);
+        return res.end(JSON.stringify({ ok: true, message: 'Update started. The service will restart shortly.' }));
+      } catch (err) {
+        res.writeHead(500, CORS_HEADERS);
+        return res.end(JSON.stringify({ error: err.message }));
+      }
+    }
+
+    res.writeHead(404, CORS_HEADERS);
+    return res.end(JSON.stringify({ error: 'Not found' }));
+  }
+
   const handler = routes[url];
 
   if (handler) {
