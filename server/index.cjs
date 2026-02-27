@@ -549,6 +549,64 @@ function handleAuth(url, method, body, req) {
     return { error: 'Failed to save preferences' };
   }
   
+  // POST /api/user/wallpaper — upload wallpaper image (base64 in body)
+  if (url === '/api/user/wallpaper' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const { data, filename } = body;
+    if (!data) return { error: 'No image data provided' };
+    
+    try {
+      // Extract base64 data
+      const matches = data.match(/^data:image\/(png|jpeg|jpg|webp|gif);base64,(.+)$/);
+      if (!matches) return { error: 'Invalid image format' };
+      
+      const ext = matches[1] === 'jpeg' ? 'jpg' : matches[1];
+      const imgBuffer = Buffer.from(matches[2], 'base64');
+      
+      // Limit to 10MB
+      if (imgBuffer.length > 10 * 1024 * 1024) return { error: 'Image too large (max 10MB)' };
+      
+      // Save to user data dir
+      const userPath = ensureUserDataDir(session.username);
+      const wallpaperFile = `wallpaper.${ext}`;
+      const fullPath = path.join(userPath, wallpaperFile);
+      fs.writeFileSync(fullPath, imgBuffer);
+      
+      // Return URL that the frontend can use
+      const wallpaperUrl = `/api/user/wallpaper/${session.username}/${wallpaperFile}`;
+      
+      // Also save URL in preferences
+      const current = getUserPreferences(session.username);
+      current.wallpaper = wallpaperUrl;
+      saveUserPreferences(session.username, current);
+      
+      return { ok: true, url: wallpaperUrl };
+    } catch (err) {
+      return { error: 'Failed to save wallpaper: ' + err.message };
+    }
+  }
+  
+  // GET /api/user/wallpaper/:username/:file — serve wallpaper image
+  const wpMatch = url.match(/^\/api\/user\/wallpaper\/([a-zA-Z0-9_.-]+)\/wallpaper\.(png|jpg|jpeg|webp|gif)$/);
+  if (wpMatch && method === 'GET') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const wpUser = wpMatch[1];
+    const ext = wpMatch[2];
+    const userPath = getUserDataPath(wpUser);
+    const wallpaperPath = path.join(userPath, `wallpaper.${ext}`);
+    
+    if (fs.existsSync(wallpaperPath)) {
+      const mimeTypes = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+      // Return special marker so the caller handles binary
+      return { __binary: true, path: wallpaperPath, mime: mimeTypes[ext] || 'image/png' };
+    }
+    return { error: 'Wallpaper not found' };
+  }
+
   // GET /api/user/playlist — get current user's playlist
   if (url === '/api/user/playlist' && method === 'GET') {
     const session = getSessionUser(req);
@@ -3641,9 +3699,9 @@ const server = http.createServer((req, res) => {
     return res.end('Icon not found');
   }
 
-  // ── Auth routes (need body parsing for POST/PUT/DELETE) ──
+  // ── Auth routes (need body parsing for POST/PUT/DELETE/PATCH) ──
   if (url.startsWith('/api/auth/') || url.startsWith('/api/users') || url.startsWith('/api/user/')) {
-    if (['POST', 'PUT', 'DELETE'].includes(method)) {
+    if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       let body = '';
       req.on('data', chunk => body += chunk);
       req.on('end', () => {
@@ -3653,6 +3711,10 @@ const server = http.createServer((req, res) => {
           if (result === null) {
             res.writeHead(404, CORS_HEADERS);
             return res.end(JSON.stringify({ error: 'Not found' }));
+          }
+          if (result.__binary) {
+            res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': result.mime });
+            return res.end(fs.readFileSync(result.path));
           }
           res.writeHead(result.error ? 400 : 200, CORS_HEADERS);
           res.end(JSON.stringify(result));
@@ -3668,6 +3730,11 @@ const server = http.createServer((req, res) => {
     if (result === null) {
       res.writeHead(404, CORS_HEADERS);
       return res.end(JSON.stringify({ error: 'Not found' }));
+    }
+    // Binary file response (e.g. wallpaper image)
+    if (result.__binary) {
+      res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': result.mime });
+      return res.end(fs.readFileSync(result.path));
     }
     res.writeHead(result.error ? (result.error === 'Unauthorized' ? 401 : 400) : 200, CORS_HEADERS);
     return res.end(JSON.stringify(result));
