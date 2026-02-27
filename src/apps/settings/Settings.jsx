@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useTheme } from '@context';
+import { useTheme, useAuth } from '@context';
 import styles from './Settings.module.css';
 
 const SIDEBAR = [
@@ -286,6 +286,7 @@ function DesktopPage() {
           wallpaper, textScale, taskbarSize,
           setShowDesktopIcons, setAutoHideTaskbar, setClock24, setTaskbarPosition,
           setWallpaper, setTextScale, setTaskbarSize } = useTheme();
+  const { token } = useAuth();
 
   const TEXT_SIZES = [
     { value: 80, label: 'XS' },
@@ -380,11 +381,30 @@ function DesktopPage() {
                 type="file"
                 accept="image/*"
                 style={{ display: 'none' }}
-                onChange={(e) => {
+                onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
                   const reader = new FileReader();
-                  reader.onload = (ev) => setWallpaper(ev.target.result);
+                  reader.onload = async (ev) => {
+                    const dataUrl = ev.target.result;
+                    // Show preview immediately
+                    setWallpaper(dataUrl);
+                    // Upload to server
+                    try {
+                      const res = await fetch('/api/user/wallpaper', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                        body: JSON.stringify({ data: dataUrl, filename: file.name })
+                      });
+                      const result = await res.json();
+                      if (result.url) {
+                        // Replace data URL with server URL
+                        setWallpaper(result.url);
+                      }
+                    } catch (err) {
+                      console.error('[Wallpaper] Upload failed:', err.message);
+                    }
+                  };
                   reader.readAsDataURL(file);
                   e.target.value = '';
                 }}
