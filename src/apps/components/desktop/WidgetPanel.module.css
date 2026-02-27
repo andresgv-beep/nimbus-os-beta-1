@@ -1,0 +1,225 @@
+/* ─── Panel: fixed right sidebar on desktop ─── */
+.panel {
+  position: absolute;
+  top: 48px; /* debajo de la topbar */
+  right: var(--space-4);
+  bottom: 76px; /* encima del dock */
+  width: min(340px, 30vw);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  z-index: var(--z-desktop-icons);
+  pointer-events: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: var(--space-2);
+}
+
+/* Ocultar scrollbar pero permitir scroll */
+.panel::-webkit-scrollbar {
+  width: 0;
+  display: none;
+}
+
+.panel {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* ─── Widget Card ─── */
+.widget {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  pointer-events: auto;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .widget {
+    background: var(--bg-bar, rgba(20,20,20,0.97)) !important;
+  }
+}
+
+.widget:hover {
+  border-color: var(--border-light);
+  background: var(--bg-card);
+}
+
+.widgetTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  margin-bottom: var(--space-3);
+}
+
+/* ─── Progress bars ─── */
+.barRow { margin-bottom: var(--space-2); }
+.barLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+}
+.bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+.barFill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 0.5s ease;
+}
+
+/* ─── Metrics ─── */
+.metricRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: var(--text-sm);
+}
+.metricLabel { color: var(--text-muted); }
+.metricValue { color: var(--text-primary); font-weight: var(--weight-medium); }
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: var(--space-2) 0;
+}
+
+/* ─── Disk Health ─── */
+.diskRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px 0;
+}
+.diskDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+  flex-shrink: 0;
+}
+.diskName { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.diskStatus { font-size: var(--text-xs); color: var(--text-muted); margin-top: 1px; }
+
+/* ─── Notifications ─── */
+.notifItem {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.notifItem:last-child { border-bottom: none; }
+.notifDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.notifText { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.4; }
+.notifTime { font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; }
+
+/* ─── Live indicator ─── */
+.liveIndicator {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--accent-green);
+  font-weight: var(--weight-normal);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* ─── Offline state ─── */
+.offline {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  padding: var(--space-2) 0;
+}
+.offlineHint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  opacity: 0.6;
+  font-family: var(--font-mono);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  [data-no-blur] { background: rgba(18, 18, 18, 0.97) !important; }
+}
+
+/* ─── Responsive: pantallas pequeñas ─── */
+@media (max-height: 700px) {
+  .panel {
+    top: 40px;
+    bottom: 70px;
+  }
+  
+  .widget {
+    padding: var(--space-3) var(--space-4);
+  }
+  
+  .widgetTitle {
+    font-size: var(--text-base);
+    margin-bottom: var(--space-2);
+  }
+  
+  .barRow {
+    margin-bottom: var(--space-1);
+  }
+  
+  .metricRow {
+    padding: 2px 0;
+  }
+}
+
+@media (max-height: 550px) {
+  .panel {
+    top: 38px;
+    bottom: 68px;
+    gap: var(--space-2);
+  }
+  
+  .widget {
+    padding: var(--space-2) var(--space-3);
+  }
+  
+  .widgetTitle {
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-1);
+  }
+  
+  .bar {
+    height: 4px;
+  }
+  
+  .diskRow {
+    padding: 3px 0;
+  }
+  
+  .notifItem {
+    padding: var(--space-1) 0;
+  }
+}
+
+/* Ocultar widgets menos importantes en pantallas muy pequeñas */
+@media (max-height: 450px) {
+  .panel {
+    justify-content: flex-start;
+  }
+}

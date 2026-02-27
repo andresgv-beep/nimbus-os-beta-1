@@ -1,0 +1,70 @@
+.menu {
+  position: fixed;
+  min-width: 200px;
+  background: var(--bg-window);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  @supports not (backdrop-filter: blur(1px)) { background: var(--bg-bar, rgba(20,20,20,0.97)) !important; }
+  z-index: 99999;
+  padding: 6px;
+  animation: ctxOpen 0.12s ease;
+}
+
+@keyframes ctxOpen {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.item:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.item:hover .shortcut {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.item:hover .itemIcon {
+  color: white;
+}
+
+.danger:hover {
+  background: var(--accent-red);
+}
+
+.itemIcon {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.shortcut {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 6px;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  [data-no-blur] { background: rgba(18, 18, 18, 0.97) !important; }
+}

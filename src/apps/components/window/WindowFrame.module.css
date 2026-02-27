@@ -1,0 +1,123 @@
+.window {
+  position: absolute;
+  background: var(--bg-window);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  will-change: transform;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.window.focused {
+  border-color: var(--accent);
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 0 var(--glow-spread, 30px) var(--accent-glow);
+}
+
+.window.dragging {
+  pointer-events: auto;
+}
+
+.window.dragging .body {
+  pointer-events: none;
+}
+
+/* ─── Header ─── */
+.header {
+  height: var(--window-header-height);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-3);
+  cursor: default;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+}
+
+/* ─── Window controls ─── */
+.controls {
+  display: flex;
+  gap: 4px;
+}
+
+.controls span {
+  width: 28px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.controls span:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.btnClose:hover {
+  background: rgba(239, 83, 80, 0.15) !important;
+  color: var(--accent-red) !important;
+}
+
+/* ─── Title ─── */
+.title {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnExternal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btnExternal:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* ─── Body ─── */
+.body {
+  flex: 1;
+  overflow: hidden;
+  margin-top: calc(-1 * var(--window-header-height));
+  padding-top: var(--window-header-height);
+}
+
+/* ─── Resize edges ─── */
+.edgeN { position: absolute; top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
+.edgeS { position: absolute; bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
+.edgeW { position: absolute; left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
+.edgeE { position: absolute; right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
+
+/* ─── Resize corners ─── */
+.cornerNW { position: absolute; top: -3px; left: -3px; width: 12px; height: 12px; cursor: nw-resize; }
+.cornerNE { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; cursor: ne-resize; }
+.cornerSW { position: absolute; bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: sw-resize; }
+.cornerSE { position: absolute; bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: se-resize; }
