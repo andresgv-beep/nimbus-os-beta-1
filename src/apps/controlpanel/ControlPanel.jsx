@@ -752,6 +752,128 @@ function AppPermissionsPage() {
 }
 
 /* ─── Placeholder pages ─── */
+/* ─── Updates Page ─── */
+function UpdatesPage() {
+  const { token } = useAuth();
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const headers = { 'Authorization': `Bearer ${token}` };
+
+  const checkForUpdates = async () => {
+    setChecking(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/system/update/check', { headers });
+      const data = await res.json();
+      if (data.error) setError(data.error);
+      else setInfo(data);
+    } catch (err) {
+      setError('Failed to check for updates');
+    }
+    setChecking(false);
+  };
+
+  const applyUpdate = async () => {
+    if (!confirm('Apply update? NimbusOS will restart and you may lose connection briefly.')) return;
+    setUpdating(true);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await fetch('/api/system/update/apply', { method: 'POST', headers });
+      const data = await res.json();
+      if (data.error) {
+        setError(data.error);
+        setUpdating(false);
+      } else {
+        setSuccess('Update started! NimbusOS is restarting...');
+        // Poll for server to come back
+        setTimeout(() => {
+          const poll = setInterval(async () => {
+            try {
+              const r = await fetch('/api/auth/status');
+              if (r.ok) {
+                clearInterval(poll);
+                setUpdating(false);
+                setSuccess('Update complete! Reload the page to see changes.');
+                setInfo(null);
+              }
+            } catch {}
+          }, 3000);
+          // Stop polling after 2 minutes
+          setTimeout(() => clearInterval(poll), 120000);
+        }, 5000);
+      }
+    } catch {
+      setError('Failed to start update');
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div>
+      <h3 className={styles.title}>System Updates</h3>
+      <div className={styles.configCard}>
+        <div className={styles.configTitle}>NimbusOS Updates</div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginBottom: '16px' }}>
+          Check for and install the latest version of NimbusOS from the official repository.
+        </p>
+
+        {info && (
+          <div style={{ marginBottom: '16px', padding: '12px', borderRadius: '8px', background: 'var(--bg-elevated, rgba(255,255,255,0.05))' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Current version</span>
+              <span style={{ fontFamily: 'monospace' }}>{info.currentVersion}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: 'var(--text-muted)' }}>Latest version</span>
+              <span style={{ fontFamily: 'monospace', color: info.updateAvailable ? 'var(--accent, #f59e0b)' : 'var(--text-success, #22c55e)' }}>
+                {info.latestVersion}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(239,68,68,0.15)', color: '#f87171', fontSize: 'var(--text-sm)' }}>
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div style={{ marginBottom: '12px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(34,197,94,0.15)', color: '#4ade80', fontSize: 'var(--text-sm)' }}>
+            {success}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className={styles.btnPrimary} onClick={checkForUpdates} disabled={checking || updating}>
+            {checking ? 'Checking...' : 'Check for Updates'}
+          </button>
+          {info && info.updateAvailable && (
+            <button className={styles.btnPrimary} onClick={applyUpdate} disabled={updating}
+              style={{ background: 'var(--accent, #f59e0b)' }}>
+              {updating ? 'Updating...' : 'Install Update'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.configCard} style={{ marginTop: '16px' }}>
+        <div className={styles.configTitle}>Update Log</div>
+        <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+          Updates are downloaded from the official NimbusOS repository and applied automatically.
+          The service restarts after each update. Check <code style={{ color: 'var(--text-primary)' }}>/var/log/nimbusos/update.log</code> for details.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderPage({ title }) {
   return (
     <div>
@@ -778,7 +900,7 @@ export default function ControlPanel() {
       case 'login': return <PlaceholderPage title="Login Settings" />;
       case 'sessions': return <PlaceholderPage title="Active Sessions" />;
       case 'history': return <PlaceholderPage title="Login History" />;
-      case 'updates': return <PlaceholderPage title="Updates" />;
+      case 'updates': return <UpdatesPage />;
       case 'backup': return <PlaceholderPage title="Backup & Restore" />;
       case 'tasks': return <PlaceholderPage title="Scheduled Tasks" />;
       case 'notif': return <PlaceholderPage title="Notifications" />;
