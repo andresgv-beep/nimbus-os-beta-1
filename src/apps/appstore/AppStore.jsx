@@ -465,8 +465,8 @@ function ContainerInstallWizard({ app, onClose, onInstalled, token, dockerPath }
                 )}
                 
                 <p className={styles.credentialsUrl}>
-                  Accede en: <a href={`http://localhost:${app.port}`} target="_blank" rel="noopener noreferrer">
-                    http://localhost:{app.port}
+                  Accede en: <a href={`http://${window.location.hostname}:${app.port}`} target="_blank" rel="noopener noreferrer">
+                    http://{window.location.hostname}:{app.port}
                   </a>
                 </p>
               </div>
@@ -804,7 +804,7 @@ export default function AppStore() {
   
   const handleOpenApp = (app) => {
     if (app.port) {
-      window.open(`http://localhost:${app.port}`, '_blank');
+      window.open(`http://${window.location.hostname}:${app.port}`, '_blank');
     }
   };
   
