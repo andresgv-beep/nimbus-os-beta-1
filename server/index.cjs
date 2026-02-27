@@ -225,18 +225,22 @@ function registerApp(appData) {
         fs.mkdirSync(iconsDir, { recursive: true });
       }
       
-      const iconFileName = `${appData.id}.svg`;
+      // Detect extension from URL or default to png
+      const urlPath = appData.icon.split('?')[0];
+      const urlExt = path.extname(urlPath).toLowerCase();
+      const ext = ['.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico'].includes(urlExt) ? urlExt : '.png';
+      const iconFileName = `${appData.id}${ext}`;
       const localIconPath = path.join(iconsDir, iconFileName);
       
       // Download synchronously using curl
-      execSync(`curl -s -o "${localIconPath}" "${appData.icon}"`, { timeout: 10000 });
+      execSync(`curl -sL -o "${localIconPath}" "${appData.icon}"`, { timeout: 10000 });
       
       // Use local path for the icon
       iconPath = `/app-icons/${iconFileName}`;
       console.log(`[App] Downloaded icon for ${appData.id}: ${iconPath}`);
     } catch (err) {
       console.error(`[App] Failed to download icon for ${appData.id}:`, err.message);
-      iconPath = '📦'; // Fallback to emoji
+      iconPath = appData.icon; // Keep original URL as fallback
     }
   }
   
@@ -3621,14 +3625,16 @@ const server = http.createServer((req, res) => {
   // ── Serve app icons ──
   if (url.startsWith('/app-icons/') && method === 'GET') {
     const iconName = path.basename(url);
-    // Security: only allow .svg and alphanumeric names
-    if (!/^[a-zA-Z0-9_-]+\.svg$/.test(iconName)) {
+    // Security: only allow alphanumeric names with image extensions
+    if (!/^[a-zA-Z0-9_-]+\.(svg|png|jpg|jpeg|webp|ico)$/.test(iconName)) {
       res.writeHead(400);
       return res.end('Invalid icon name');
     }
     const iconPath = path.join(__dirname, '..', 'public', 'app-icons', iconName);
     if (fs.existsSync(iconPath)) {
-      res.writeHead(200, { 'Content-Type': 'image/svg+xml', ...CORS_HEADERS });
+      const ext = path.extname(iconName).toLowerCase();
+      const mimeTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon' };
+      res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': mimeTypes[ext] || 'image/png' });
       return res.end(fs.readFileSync(iconPath));
     }
     res.writeHead(404);
