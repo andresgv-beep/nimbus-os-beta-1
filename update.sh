@@ -49,7 +49,7 @@ fi
 
 # ── Download latest ──
 log "Downloading latest version..."
-if ! curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C "$INSTALL_DIR"; then
+if ! curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 --overwrite -C "$INSTALL_DIR"; then
   err "Download failed!"
   # Restore node_modules
   if [[ -d "/tmp/nimbusos-node-modules-$$" ]]; then

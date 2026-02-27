@@ -183,11 +183,11 @@ install_nimbusos() {
   
   if [[ -d "$INSTALL_DIR/server" ]]; then
     log "Updating existing installation..."
-    curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C "$INSTALL_DIR"
+    curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 --overwrite -C "$INSTALL_DIR"
   else
     log "Downloading NimbusOS..."
     mkdir -p "$INSTALL_DIR"
-    curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C "$INSTALL_DIR"
+    curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 --overwrite -C "$INSTALL_DIR"
   fi
 
   cd "$INSTALL_DIR"
