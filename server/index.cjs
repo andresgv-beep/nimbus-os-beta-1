@@ -3642,7 +3642,7 @@ const server = http.createServer((req, res) => {
   }
 
   // ── Auth routes (need body parsing for POST/PUT/DELETE) ──
-  if (url.startsWith('/api/auth/') || url.startsWith('/api/users')) {
+  if (url.startsWith('/api/auth/') || url.startsWith('/api/users') || url.startsWith('/api/user/')) {
     if (['POST', 'PUT', 'DELETE'].includes(method)) {
       let body = '';
       req.on('data', chunk => body += chunk);
@@ -4037,7 +4037,12 @@ const server = http.createServer((req, res) => {
       }
       
       // If file doesn't exist, serve index.html (SPA fallback)
+      // BUT NOT for /api/ routes — those should return 404 JSON
       if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        if (url.startsWith('/api/')) {
+          res.writeHead(404, CORS_HEADERS);
+          return res.end(JSON.stringify({ error: 'Endpoint not found' }));
+        }
         filePath = path.join(DIST_DIR, 'index.html');
       }
       
