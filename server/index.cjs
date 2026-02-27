@@ -3699,6 +3699,23 @@ const server = http.createServer((req, res) => {
     return res.end('Icon not found');
   }
 
+  // ── Serve user wallpapers ──
+  const wpUrlMatch = url.match(/^\/api\/user\/wallpaper\/([a-zA-Z0-9_.-]+)\/(wallpaper\.(png|jpg|jpeg|webp|gif))$/);
+  if (wpUrlMatch && method === 'GET') {
+    const wpUser = wpUrlMatch[1];
+    const wpFile = wpUrlMatch[2];
+    const userPath = path.join(NIMBUS_ROOT, 'userdata', wpUser);
+    const wallpaperPath = path.join(userPath, wpFile);
+    if (fs.existsSync(wallpaperPath)) {
+      const ext = path.extname(wpFile).toLowerCase();
+      const mimeTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
+      res.writeHead(200, { ...CORS_HEADERS, 'Content-Type': mimeTypes[ext] || 'image/png', 'Cache-Control': 'no-cache' });
+      return res.end(fs.readFileSync(wallpaperPath));
+    }
+    res.writeHead(404);
+    return res.end('Wallpaper not found');
+  }
+
   // ── Auth routes (need body parsing for POST/PUT/DELETE/PATCH) ──
   if (url.startsWith('/api/auth/') || url.startsWith('/api/users') || url.startsWith('/api/user/')) {
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
