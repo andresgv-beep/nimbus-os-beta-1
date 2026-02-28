@@ -118,7 +118,7 @@ function OverviewPage({pools, allDisks}) {
   </div>);
 }
 
-function PoolCard({pool}) {
+function PoolCard({pool, onDestroy}) {
   return (
     <div className={styles.raidCard}>
       <div className={styles.raidHeader}>
@@ -140,13 +140,21 @@ function PoolCard({pool}) {
           </div>);
         })}
       </div>
-      {pool.total>0 && (
-        <div className={styles.raidSync}>
-          <span>{formatBytes(pool.used)} / {formatBytes(pool.total)}</span>
-          <div className={styles.progressBar}><div className={styles.progressFill} style={{width:`${pool.usagePercent}%`,background:pool.usagePercent>90?'#f87171':pool.usagePercent>75?'#fbbf24':'var(--accent-green)'}}/></div>
-          <span>{pool.usagePercent}%</span>
+      <div style={{display:'flex',alignItems:'center',gap:12,marginTop:8}}>
+        <div style={{flex:1,display:'flex',alignItems:'center',gap:8}}>
+          {pool.total>0 && (<>
+            <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)',whiteSpace:'nowrap'}}>{formatBytes(pool.used)} / {formatBytes(pool.total)}</span>
+            <div className={styles.progressBar} style={{flex:1}}><div className={styles.progressFill} style={{width:`${pool.usagePercent}%`,background:pool.usagePercent>90?'#f87171':pool.usagePercent>75?'#fbbf24':'var(--accent-green)'}}/></div>
+            <span style={{fontSize:'var(--text-xs)',color:'var(--text-muted)'}}>{pool.usagePercent}%</span>
+          </>)}
         </div>
-      )}
+        {onDestroy && (
+          <button onClick={()=>onDestroy(pool)} className={styles.btn}
+            style={{fontSize:'var(--text-xs)',padding:'3px 8px',color:'#f87171',borderColor:'rgba(239,68,68,0.3)',whiteSpace:'nowrap'}}>
+            Destroy
+          </button>
+        )}
+      </div>
       {pool.rebuildProgress!==null && (
         <div className={styles.raidSync}><span>Rebuild:</span><div className={styles.progressBar}><div className={styles.progressFill} style={{width:`${pool.rebuildProgress}%`,background:'#fbbf24'}}/></div><span>{pool.rebuildProgress}%</span></div>
       )}
@@ -272,13 +280,7 @@ function PoolsPage({pools, token, onRefresh}) {
   return (<div>
     <div className={styles.sectionHeader}><h3>Storage Pools ({pools.length})</h3></div>
     {pools.map(p=>(
-      <div key={p.name}>
-        <PoolCard pool={p}/>
-        <div style={{display:'flex',gap:8,padding:'0 0 16px',justifyContent:'flex-end'}}>
-          <button className={styles.btn} onClick={()=>{setDestroyConfirm(p);setDestroyInput('');setDestroyError('');}}
-            style={{fontSize:'var(--text-xs)',color:'#f87171',borderColor:'rgba(239,68,68,0.3)'}}>Destroy Pool</button>
-        </div>
-      </div>
+      <PoolCard key={p.name} pool={p} onDestroy={p=>{setDestroyConfirm(p);setDestroyInput('');setDestroyError('');}}/>
     ))}
 
     {destroyConfirm&&(
