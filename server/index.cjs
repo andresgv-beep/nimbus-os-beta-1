@@ -3767,16 +3767,37 @@ function detectStorageDisks() {
       continue;
     }
     
-    // Check if already part of a NIMBUS pool
+    // Check if already part of a NIMBUS pool (by label OR by storage config)
     const hasNimbusLabel = diskInfo.partitions.some(p => 
       p.label && p.label.startsWith('NIMBUS-')
     );
+    const storageConf = getStorageConfig();
+    const inPool = (storageConf.pools || []).some(pool => 
+      (pool.disks || []).includes(diskInfo.path)
+    );
     
-    if (hasNimbusLabel) {
+    if (hasNimbusLabel || inPool) {
       diskInfo.classification = 'provisioned';
+      diskInfo.poolName = inPool ? (storageConf.pools || []).find(p => (p.disks || []).includes(diskInfo.path))?.name : null;
       result.provisioned.push(diskInfo);
       continue;
     }
+    
+    // Detect existing RAID/LVM superblocks (from Synology, old arrays, etc.)
+    let hasRaidSuperblock = false;
+    let hasForeignData = false;
+    for (const part of diskInfo.partitions) {
+      const superCheck = run(`mdadm --examine ${part.path} 2>/dev/null`);
+      if (superCheck && superCheck.includes('Magic')) hasRaidSuperblock = true;
+      if (part.fstype === 'LVM2_member' || part.fstype === 'linux_raid_member') hasRaidSuperblock = true;
+    }
+    // Also check raw disk for RAID superblock
+    const diskSuperCheck = run(`mdadm --examine ${diskInfo.path} 2>/dev/null`);
+    if (diskSuperCheck && diskSuperCheck.includes('Magic')) hasRaidSuperblock = true;
+    
+    diskInfo.hasRaidSuperblock = hasRaidSuperblock;
+    diskInfo.hasExistingData = diskInfo.partitions.length > 0;
+    diskInfo.needsWipe = hasRaidSuperblock || diskInfo.hasExistingData;
     
     // Rule: Boot disk with free space OR clean disk -> eligible
     // Boot disk participates in pool using its free space (system partitions stay intact)
@@ -4016,6 +4037,29 @@ function createPool(name, disks, level, filesystem = 'ext4') {
       const diskInfo = detected.eligible.find(d => d.path === disk);
       const isBoot = diskInfo && diskInfo.isBoot;
       
+      // Clear any existing RAID superblocks and LVM from this disk
+      if (!isBoot) {
+        // Stop any arrays this disk is part of
+        const mdstat = readFile('/proc/mdstat') || '';
+        const diskName = disk.replace('/dev/', '');
+        for (const line of mdstat.split('\n')) {
+          if (line.includes(diskName)) {
+            const arrayMatch = line.match(/^(md\d+)/);
+            if (arrayMatch) {
+              execSync(`mdadm --stop /dev/${arrayMatch[1]} 2>/dev/null || true`, { timeout: 10000 });
+            }
+          }
+        }
+        // Clear superblocks from all existing partitions
+        if (diskInfo && diskInfo.partitions) {
+          for (const part of diskInfo.partitions) {
+            execSync(`mdadm --zero-superblock ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+            execSync(`pvremove -f ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+          }
+        }
+        execSync(`mdadm --zero-superblock ${disk} 2>/dev/null || true`, { timeout: 5000 });
+      }
+      
       if (isBoot) {
         // Boot disk: find next available partition number and create in free space
         // DO NOT wipe the disk — system partitions must survive
@@ -4126,6 +4170,127 @@ function createPool(name, disks, level, filesystem = 'ext4') {
   } catch (err) {
     console.error('[Storage] Pool creation failed:', err.message);
     return { error: 'Pool creation failed: ' + err.message };
+  }
+}
+
+// Wipe a disk: stop any RAID arrays, clear superblocks, remove all partitions
+function wipeDisk(diskPath) {
+  // Safety: verify the disk exists and is not the boot disk
+  const detected = detectStorageDisks();
+  const allDisks = [...detected.eligible, ...detected.provisioned];
+  const diskInfo = allDisks.find(d => d.path === diskPath);
+  
+  if (!diskInfo) {
+    return { error: `Disk ${diskPath} not found or not wipeable` };
+  }
+  if (diskInfo.isBoot) {
+    return { error: 'Cannot wipe the boot disk' };
+  }
+  
+  // Check if disk is part of an active pool
+  const config = getStorageConfig();
+  const inPool = (config.pools || []).find(p => (p.disks || []).includes(diskPath));
+  if (inPool) {
+    return { error: `Disk is part of pool "${inPool.name}". Destroy the pool first.` };
+  }
+  
+  try {
+    // 1. Stop any RAID arrays this disk participates in
+    const mdstat = readFile('/proc/mdstat') || '';
+    const diskName = diskPath.replace('/dev/', '');
+    const lines = mdstat.split('\n');
+    for (const line of lines) {
+      if (line.includes(diskName)) {
+        const arrayMatch = line.match(/^(md\d+)/);
+        if (arrayMatch) {
+          console.log(`[Storage] Stopping array /dev/${arrayMatch[1]} (contains ${diskPath})`);
+          execSync(`mdadm --stop /dev/${arrayMatch[1]} 2>/dev/null || true`, { timeout: 10000 });
+        }
+      }
+    }
+    
+    // 2. Clear RAID superblocks from all partitions
+    for (const part of diskInfo.partitions) {
+      execSync(`mdadm --zero-superblock ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+    }
+    execSync(`mdadm --zero-superblock ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
+    
+    // 3. Remove all LVM
+    for (const part of diskInfo.partitions) {
+      execSync(`pvremove -f ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+    }
+    
+    // 4. Wipe partition table
+    execSync(`sgdisk -Z ${diskPath}`, { timeout: 10000 });
+    execSync(`partprobe ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
+    
+    // 5. Clear disk cache
+    diskCache = null;
+    
+    console.log(`[Storage] Disk ${diskPath} wiped successfully`);
+    return { ok: true, disk: diskPath };
+    
+  } catch (err) {
+    console.error(`[Storage] Wipe failed for ${diskPath}:`, err.message);
+    return { error: 'Wipe failed: ' + err.message };
+  }
+}
+
+// Destroy a pool: unmount, remove fstab entry, stop RAID, clear config
+function destroyPool(poolName) {
+  const config = getStorageConfig();
+  const poolConf = (config.pools || []).find(p => p.name === poolName);
+  
+  if (!poolConf) {
+    return { error: `Pool "${poolName}" not found` };
+  }
+  
+  try {
+    // 1. Unmount
+    execSync(`umount ${poolConf.mountPoint} 2>/dev/null || true`, { timeout: 10000 });
+    
+    // 2. Stop RAID array if exists
+    if (poolConf.arrayName) {
+      execSync(`mdadm --stop /dev/${poolConf.arrayName} 2>/dev/null || true`, { timeout: 10000 });
+    }
+    
+    // 3. Clear RAID superblocks from member disks
+    for (const disk of (poolConf.disks || [])) {
+      // Find the partition that was used
+      const parts = run(`lsblk -ln -o NAME ${disk} 2>/dev/null`) || '';
+      for (const part of parts.split('\n').filter(Boolean)) {
+        execSync(`mdadm --zero-superblock /dev/${part.trim()} 2>/dev/null || true`, { timeout: 5000 });
+      }
+    }
+    
+    // 4. Remove fstab entry
+    execSync(`sed -i '/${poolName.replace(/[/\\]/g, '\\/')}/d' /etc/fstab 2>/dev/null || true`);
+    // Also remove by mount point
+    const escapedMount = poolConf.mountPoint.replace(/\//g, '\\/');
+    execSync(`sed -i '/${escapedMount}/d' /etc/fstab 2>/dev/null || true`);
+    
+    // 5. Remove mount point directory
+    execSync(`rm -rf ${poolConf.mountPoint} 2>/dev/null || true`);
+    
+    // 6. Update mdadm config
+    execSync('mdadm --detail --scan > /etc/mdadm/mdadm.conf 2>/dev/null || true');
+    
+    // 7. Remove from storage config
+    config.pools = (config.pools || []).filter(p => p.name !== poolName);
+    if (config.primaryPool === poolName) {
+      config.primaryPool = config.pools.length > 0 ? config.pools[0].name : null;
+    }
+    saveStorageConfig(config);
+    
+    // 8. Clear disk cache
+    diskCache = null;
+    
+    console.log(`[Storage] Pool "${poolName}" destroyed`);
+    return { ok: true, pool: poolName };
+    
+  } catch (err) {
+    console.error(`[Storage] Destroy pool failed:`, err.message);
+    return { error: 'Destroy failed: ' + err.message };
   }
 }
 
@@ -4781,6 +4946,20 @@ const server = http.createServer((req, res) => {
         else if (url === '/api/storage/backup' && method === 'POST') {
           backupConfigToPool();
           result = { ok: true };
+        }
+        
+        // POST /api/storage/wipe — wipe a disk (clear RAID/partitions)
+        else if (url === '/api/storage/wipe' && method === 'POST') {
+          const { disk } = parsed;
+          if (!disk) { result = { error: 'Provide disk path' }; }
+          else { result = wipeDisk(disk); }
+        }
+        
+        // POST /api/storage/pool/destroy — destroy a pool
+        else if (url === '/api/storage/pool/destroy' && method === 'POST') {
+          const { name } = parsed;
+          if (!name) { result = { error: 'Provide pool name' }; }
+          else { result = destroyPool(name); }
         }
         
         if (result === null) {
