@@ -3910,16 +3910,25 @@ function getStoragePools() {
       }
     }
     
+    // Determine pool status
+    let poolStatus = 'unknown';
+    if (raid) {
+      poolStatus = raid.status; // RAID array: use mdstat status
+    } else if (poolConf.raidLevel === 'single' || poolConf.arrayName === null) {
+      // Single disk pool: check if mounted and has data
+      poolStatus = total > 0 ? 'active' : 'unmounted';
+    }
+    
     pools.push({
       name: poolConf.name,
       arrayName: poolConf.arrayName,
-      arrayPath: `/dev/${poolConf.arrayName}`,
+      arrayPath: poolConf.arrayName ? `/dev/${poolConf.arrayName}` : null,
       mountPoint: poolConf.mountPoint,
       raidLevel: poolConf.raidLevel,
       filesystem: poolConf.filesystem || 'ext4',
       createdAt: poolConf.createdAt,
       disks: poolConf.disks || [],
-      status: raid ? raid.status : 'unknown',
+      status: poolStatus,
       rebuildProgress: raid ? raid.progress : null,
       members: raid ? raid.members : [],
       total, used, available,
@@ -4960,6 +4969,41 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Endpoints:`);
   Object.keys(routes).forEach(r => console.log(`    GET ${r}`));
   console.log(`\n  Auto-detecting hardware...`);
+
+  // ── Mount storage pools on startup ──
+  try {
+    const storageConf = getStorageConfig();
+    if (storageConf.pools && storageConf.pools.length > 0) {
+      // Ensure mount points exist and mount all fstab entries
+      for (const pool of storageConf.pools) {
+        try {
+          execSync(`mkdir -p ${pool.mountPoint}`, { timeout: 5000 });
+        } catch {}
+      }
+      // Mount everything in fstab that isn't mounted yet
+      execSync('mount -a 2>/dev/null || true', { timeout: 15000 });
+      
+      // Verify mounts
+      for (const pool of storageConf.pools) {
+        const mounted = run(`mountpoint -q ${pool.mountPoint} 2>/dev/null && echo yes || echo no`);
+        if (mounted && mounted.trim() === 'yes') {
+          console.log(`    Storage: Pool "${pool.name}" mounted at ${pool.mountPoint}`);
+        } else {
+          console.log(`    Storage: WARNING - Pool "${pool.name}" failed to mount at ${pool.mountPoint}`);
+        }
+      }
+      
+      // Run initial health check
+      checkStorageHealth();
+      
+      // Initial config backup
+      backupConfigToPool();
+    } else {
+      console.log(`    Storage: No pools configured (locked mode)`);
+    }
+  } catch (err) {
+    console.log(`    Storage: Startup check failed: ${err.message}`);
+  }
 
   // Auto-configure Docker if installed but not configured
   try {
