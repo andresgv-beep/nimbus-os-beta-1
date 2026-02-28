@@ -31,14 +31,14 @@
 .themeRow { display: flex; gap: var(--space-3); }
 .themePreview { cursor: pointer; flex: 1; }
 .themeBox {
-  width: 100%; height: 60px; border-radius: var(--radius); border: 2px solid var(--border);
+  width: 100%; height: 90px; border-radius: var(--radius); border: 2px solid var(--border);
   display: flex; overflow: hidden; transition: var(--transition);
 }
 .themePreview:hover .themeBox { border-color: var(--border-light); }
 .themeSelected .themeBox { border-color: var(--accent) !important; }
 .themeSidebar { width: 30%; }
-.themeContent { flex: 1; padding: var(--space-2); display: flex; flex-direction: column; gap: 4px; }
-.themeBar { height: 6px; border-radius: 2px; }
+.themeContent { flex: 1; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.themeBar { height: 8px; border-radius: 3px; }
 .themeLabel {
   display: block; text-align: center; font-size: var(--text-sm);
   margin-top: var(--space-2); color: var(--text-muted);
