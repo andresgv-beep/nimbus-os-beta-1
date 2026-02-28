@@ -19,6 +19,7 @@
 .sidebarIcon { display: flex; align-items: center; justify-content: center; width: 20px; flex-shrink: 0; }
 
 .main { flex: 1; padding: var(--space-5); overflow-y: auto; }
+.main > * { max-width: 820px; }
 
 /* Stats */
 .statsRow {
