@@ -3677,10 +3677,10 @@ function hasPool() {
 
 // Detect and classify all disks per the architecture document
 function detectStorageDisks() {
-  const result = { eligible: [], nvme: [], usb: [], boot: [], provisioned: [] };
+  const result = { eligible: [], nvme: [], usb: [], provisioned: [] };
   
   // Get all block devices with extended info
-  const lsblkRaw = run('lsblk -J -o NAME,SIZE,TYPE,ROTA,MOUNTPOINT,MODEL,SERIAL,TRAN,RM,FSTYPE,LABEL,PKNAME 2>/dev/null');
+  const lsblkRaw = run('lsblk -J -b -o NAME,SIZE,TYPE,ROTA,MOUNTPOINT,MODEL,SERIAL,TRAN,RM,FSTYPE,LABEL,PKNAME 2>/dev/null');
   if (!lsblkRaw) return result;
   
   let data;
@@ -3711,21 +3711,32 @@ function detectStorageDisks() {
       partitions: [],
       smart: null,
       temperature: null,
+      isBoot: dev.name === rootDisk,
+      freeSpace: 0,
+      freeSpaceFormatted: '0 B',
     };
     
     // Get partitions
+    let usedSpace = 0;
     if (dev.children) {
       for (const child of dev.children) {
+        const partSize = parseInt(child.size) || 0;
+        usedSpace += partSize;
         diskInfo.partitions.push({
           name: child.name,
           path: `/dev/${child.name}`,
-          size: parseInt(child.size) || 0,
+          size: partSize,
+          sizeFormatted: formatBytes(partSize),
           fstype: child.fstype || null,
           label: child.label || null,
           mountpoint: child.mountpoint || null,
         });
       }
     }
+    
+    // Calculate free space on disk (total - all partitions)
+    diskInfo.freeSpace = Math.max(0, size - usedSpace);
+    diskInfo.freeSpaceFormatted = formatBytes(diskInfo.freeSpace);
     
     // Get SMART + temperature
     if (HAS_SMARTCTL) {
@@ -3756,13 +3767,6 @@ function detectStorageDisks() {
       continue;
     }
     
-    // Rule: Boot disk (HDD/SSD with root partition)
-    if (dev.name === rootDisk) {
-      diskInfo.classification = 'boot';
-      result.boot.push(diskInfo);
-      continue;
-    }
-    
     // Check if already part of a NIMBUS pool
     const hasNimbusLabel = diskInfo.partitions.some(p => 
       p.label && p.label.startsWith('NIMBUS-')
@@ -3774,10 +3778,29 @@ function detectStorageDisks() {
       continue;
     }
     
-    // Rule: Eligible (HDD or SSD, not boot, not NVMe, not USB)
-    diskInfo.classification = diskInfo.rotational ? 'hdd' : 'ssd';
-    diskInfo.hasExistingData = diskInfo.partitions.length > 0;
-    result.eligible.push(diskInfo);
+    // Rule: Boot disk with free space OR clean disk -> eligible
+    // Boot disk participates in pool using its free space (system partitions stay intact)
+    // Non-boot disk uses entire disk
+    if (diskInfo.isBoot) {
+      // Boot disk: eligible ONLY if it has enough free space (min 5GB)
+      const minFreeBytes = 5 * 1024 * 1024 * 1024; // 5GB
+      if (diskInfo.freeSpace >= minFreeBytes) {
+        diskInfo.classification = diskInfo.rotational ? 'hdd' : 'ssd';
+        diskInfo.availableSpace = diskInfo.freeSpace;
+        diskInfo.availableSpaceFormatted = formatBytes(diskInfo.freeSpace);
+        diskInfo.hasExistingData = false; // System partitions are expected
+        result.eligible.push(diskInfo);
+      }
+      // If not enough free space, boot disk just doesn't appear as eligible
+      // (no separate 'boot' category needed)
+    } else {
+      // Non-boot disk: use entire disk
+      diskInfo.classification = diskInfo.rotational ? 'hdd' : 'ssd';
+      diskInfo.availableSpace = size;
+      diskInfo.availableSpaceFormatted = formatBytes(size);
+      diskInfo.hasExistingData = diskInfo.partitions.length > 0;
+      result.eligible.push(diskInfo);
+    }
   }
   
   return result;
@@ -3975,16 +3998,36 @@ function createPool(name, disks, level, filesystem = 'ext4') {
   
   try {
     // 1. Partition each disk
+    // Boot disks: add new partition in free space (keep system partitions)
+    // Non-boot disks: wipe and use entire disk
+    const detected = detectStorageDisks();
+    const partitions = [];
+    
     for (const disk of disks) {
-      execSync(`sgdisk -Z ${disk} 2>/dev/null || true`, { timeout: 10000 });
-      execSync(`sgdisk -n 1:0:0 -t 1:FD00 -c 1:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
+      const diskInfo = detected.eligible.find(d => d.path === disk);
+      const isBoot = diskInfo && diskInfo.isBoot;
+      
+      if (isBoot) {
+        // Boot disk: find next available partition number and create in free space
+        // DO NOT wipe the disk — system partitions must survive
+        const existingParts = diskInfo.partitions.length;
+        const nextPartNum = existingParts + 1;
+        execSync(`sgdisk -n ${nextPartNum}:0:0 -t ${nextPartNum}:FD00 -c ${nextPartNum}:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
+        partitions.push(`${disk}${nextPartNum}`);
+        console.log(`[Storage] Boot disk ${disk}: created partition ${nextPartNum} in free space`);
+      } else {
+        // Clean disk: wipe and use entire disk
+        execSync(`sgdisk -Z ${disk} 2>/dev/null || true`, { timeout: 10000 });
+        execSync(`sgdisk -n 1:0:0 -t 1:FD00 -c 1:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
+        partitions.push(`${disk}1`);
+        console.log(`[Storage] Clean disk ${disk}: wiped and created partition 1`);
+      }
     }
+    
     execSync(`partprobe ${disks.join(' ')} 2>/dev/null || true`, { timeout: 10000 });
     
     // Wait for partitions to appear
     execSync('sleep 2');
-    
-    const partitions = disks.map(d => `${d}1`);
     
     // 2. Create RAID array (or single disk)
     if (isSingleDisk) {
