@@ -93,17 +93,39 @@ install_deps() {
 
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
+
+  # Critical packages (fail if these don't install)
+  log "Installing core packages..."
   apt-get install -y -qq \
     curl wget git ca-certificates gnupg lsb-release \
     smartmontools hdparm lm-sensors \
-    ufw \
-    avahi-daemon \
-    samba \
-    nfs-kernel-server \
     mdadm \
-    ntfs-3g exfat-fuse exfat-utils 2>/dev/null || true
+    samba \
+    ufw \
+    avahi-daemon
 
-  ok "System packages installed"
+  ok "Core packages installed"
+
+  # Optional packages (nice to have, don't fail)
+  log "Installing optional packages..."
+  apt-get install -y -qq nfs-kernel-server 2>/dev/null || warn "nfs-kernel-server not available"
+  apt-get install -y -qq ntfs-3g 2>/dev/null || warn "ntfs-3g not available"
+  apt-get install -y -qq exfat-fuse 2>/dev/null || warn "exfat-fuse not available"
+  apt-get install -y -qq exfat-utils 2>/dev/null || apt-get install -y -qq exfatprogs 2>/dev/null || warn "exfat utils not available"
+
+  # Verify critical tools
+  local missing=""
+  command -v smbd &>/dev/null || missing="$missing samba"
+  command -v mdadm &>/dev/null || missing="$missing mdadm"
+  command -v smartctl &>/dev/null || missing="$missing smartmontools"
+
+  if [[ -n "$missing" ]]; then
+    err "Failed to install critical packages:$missing"
+    err "Try: apt-get install -y$missing"
+    exit 1
+  fi
+
+  ok "All critical packages verified"
 }
 
 # ── Install Node.js ──
