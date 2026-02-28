@@ -805,7 +805,7 @@ function handleShares(url, method, body, req) {
   // POST /api/shares — create shared folder (admin only)
   if (url === '/api/shares' && method === 'POST') {
     if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
-    const { name, description } = body;
+    const { name, description, pool } = body;
     if (!name || !name.trim()) return { error: 'Folder name required' };
     if (/[^a-zA-Z0-9_\- ]/.test(name.trim())) return { error: 'Name can only contain letters, numbers, spaces, -, _' };
 
@@ -814,8 +814,19 @@ function handleShares(url, method, body, req) {
 
     if (shares.find(s => s.name === safeName)) return { error: 'Shared folder already exists' };
 
-    // Create actual directory
-    const folderPath = path.join(VOLUMES_DIR, 'volume1', safeName);
+    // Determine target path — MUST use a pool
+    const storageConf = getStorageConfig();
+    const targetPool = pool 
+      ? (storageConf.pools || []).find(p => p.name === pool)
+      : (storageConf.pools || []).find(p => p.name === storageConf.primaryPool);
+    
+    if (!targetPool) {
+      return { error: 'No storage pool available. Create a pool in Storage Manager first.' };
+    }
+    
+    const folderPath = path.join(targetPool.mountPoint, 'shares', safeName);
+    const volumeName = targetPool.name;
+    
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
     }
@@ -829,7 +840,8 @@ function handleShares(url, method, body, req) {
       displayName: name.trim(),
       description: description || '',
       path: folderPath,
-      volume: 'volume1',
+      volume: volumeName,
+      pool: targetPool ? targetPool.name : null,
       created: new Date().toISOString(),
       createdBy: session.username,
       recycleBin: true,
@@ -838,7 +850,7 @@ function handleShares(url, method, body, req) {
     });
     saveShares(shares);
 
-    return { ok: true, name: safeName, path: folderPath };
+    return { ok: true, name: safeName, path: folderPath, pool: volumeName };
   }
 
   // PUT /api/shares/:name — update shared folder (admin only)
