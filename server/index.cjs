@@ -3653,6 +3653,574 @@ function getCachedSystem() {
   return systemCache.data;
 }
 
+// ═══════════════════════════════════════════════════
+// STORAGE MANAGER
+// ═══════════════════════════════════════════════════
+
+const NIMBUS_POOLS_DIR = '/nimbus/pools';
+const STORAGE_CONFIG_FILE = path.join(CONFIG_DIR, 'storage.json');
+
+function getStorageConfig() {
+  try { return JSON.parse(fs.readFileSync(STORAGE_CONFIG_FILE, 'utf8')); }
+  catch { return { pools: [], primaryPool: null, alerts: { email: null }, configuredAt: null }; }
+}
+
+function saveStorageConfig(config) {
+  fs.writeFileSync(STORAGE_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+// Check if system has at least one pool
+function hasPool() {
+  const config = getStorageConfig();
+  return config.pools && config.pools.length > 0;
+}
+
+// Detect and classify all disks per the architecture document
+function detectStorageDisks() {
+  const result = { eligible: [], nvme: [], usb: [], boot: [], provisioned: [] };
+  
+  // Get all block devices with extended info
+  const lsblkRaw = run('lsblk -J -o NAME,SIZE,TYPE,ROTA,MOUNTPOINT,MODEL,SERIAL,TRAN,RM,FSTYPE,LABEL,PKNAME 2>/dev/null');
+  if (!lsblkRaw) return result;
+  
+  let data;
+  try { data = JSON.parse(lsblkRaw); } catch { return result; }
+  
+  const devices = data.blockdevices || [];
+  
+  // Find which disk has the root partition
+  const rootDisk = findRootDisk(devices);
+  
+  for (const dev of devices) {
+    if (dev.type !== 'disk') continue;
+    if (dev.name.startsWith('loop') || dev.name.startsWith('ram') || dev.name.startsWith('zram')) continue;
+    
+    const size = parseInt(dev.size) || 0;
+    if (size <= 0) continue;
+    
+    const diskInfo = {
+      name: dev.name,
+      path: `/dev/${dev.name}`,
+      model: (dev.model || 'Unknown').trim(),
+      serial: (dev.serial || '').trim(),
+      size: size,
+      sizeFormatted: formatBytes(size),
+      transport: dev.tran || 'unknown',
+      rotational: dev.rota === true || dev.rota === '1' || dev.rota === 1,
+      removable: dev.rm === true || dev.rm === '1' || dev.rm === 1,
+      partitions: [],
+      smart: null,
+      temperature: null,
+    };
+    
+    // Get partitions
+    if (dev.children) {
+      for (const child of dev.children) {
+        diskInfo.partitions.push({
+          name: child.name,
+          path: `/dev/${child.name}`,
+          size: parseInt(child.size) || 0,
+          fstype: child.fstype || null,
+          label: child.label || null,
+          mountpoint: child.mountpoint || null,
+        });
+      }
+    }
+    
+    // Get SMART + temperature
+    if (HAS_SMARTCTL) {
+      const smartHealth = run(`smartctl -H /dev/${dev.name} 2>/dev/null`);
+      if (smartHealth) {
+        diskInfo.smart = smartHealth.includes('PASSED') ? 'PASSED' : 
+                         smartHealth.includes('FAILED') ? 'FAILED' : 'UNKNOWN';
+      }
+      const smartTemp = run(`smartctl -A /dev/${dev.name} 2>/dev/null | grep -i temperature | head -1`);
+      if (smartTemp) {
+        const m = smartTemp.match(/(\d+)\s*$/);
+        if (m) diskInfo.temperature = parseInt(m[1]);
+      }
+    }
+    
+    // CLASSIFY per document rules
+    // Rule: USB -> skip
+    if (diskInfo.removable || diskInfo.transport === 'usb') {
+      diskInfo.classification = 'usb';
+      result.usb.push(diskInfo);
+      continue;
+    }
+    
+    // Rule: NVMe
+    if (dev.name.startsWith('nvme')) {
+      diskInfo.classification = dev.name === rootDisk ? 'nvme-system' : 'nvme-cache';
+      result.nvme.push(diskInfo);
+      continue;
+    }
+    
+    // Rule: Boot disk (HDD/SSD with root partition)
+    if (dev.name === rootDisk) {
+      diskInfo.classification = 'boot';
+      result.boot.push(diskInfo);
+      continue;
+    }
+    
+    // Check if already part of a NIMBUS pool
+    const hasNimbusLabel = diskInfo.partitions.some(p => 
+      p.label && p.label.startsWith('NIMBUS-')
+    );
+    
+    if (hasNimbusLabel) {
+      diskInfo.classification = 'provisioned';
+      result.provisioned.push(diskInfo);
+      continue;
+    }
+    
+    // Rule: Eligible (HDD or SSD, not boot, not NVMe, not USB)
+    diskInfo.classification = diskInfo.rotational ? 'hdd' : 'ssd';
+    diskInfo.hasExistingData = diskInfo.partitions.length > 0;
+    result.eligible.push(diskInfo);
+  }
+  
+  return result;
+}
+
+function findRootDisk(devices) {
+  for (const dev of devices) {
+    if (dev.children) {
+      for (const child of dev.children) {
+        if (child.mountpoint === '/') return dev.name;
+      }
+    }
+    if (dev.mountpoint === '/') return dev.name;
+  }
+  return null;
+}
+
+// Get RAID array status from /proc/mdstat
+function getRAIDStatus() {
+  const mdstat = readFile('/proc/mdstat');
+  const arrays = [];
+  
+  if (!mdstat) return arrays;
+  
+  const lines = mdstat.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(/^(md\d+)\s*:\s*active\s+(\w+)\s+(.+)/);
+    if (!match) continue;
+    
+    const name = match[1];
+    const level = match[2];
+    const devicesStr = match[3];
+    
+    // Parse member devices
+    const members = [];
+    const devMatches = devicesStr.matchAll(/(\w+)\[(\d+)\](\((?:S|F)\))?/g);
+    for (const dm of devMatches) {
+      members.push({
+        device: dm[1],
+        index: parseInt(dm[2]),
+        spare: dm[3] === '(S)',
+        failed: dm[3] === '(F)',
+      });
+    }
+    
+    // Next line has blocks and status
+    let status = 'active';
+    let progress = null;
+    let totalBlocks = 0;
+    if (i + 1 < lines.length) {
+      const statusLine = lines[i + 1];
+      const blocksMatch = statusLine.match(/(\d+)\s+blocks/);
+      if (blocksMatch) totalBlocks = parseInt(blocksMatch[1]);
+      
+      if (statusLine.includes('[_')) status = 'degraded';
+    }
+    if (i + 2 < lines.length) {
+      const progressLine = lines[i + 2];
+      const rebuildMatch = progressLine.match(/recovery\s*=\s*([\d.]+)%/);
+      const reshapeMatch = progressLine.match(/reshape\s*=\s*([\d.]+)%/);
+      if (rebuildMatch) {
+        status = 'rebuilding';
+        progress = parseFloat(rebuildMatch[1]);
+      } else if (reshapeMatch) {
+        status = 'reshaping';
+        progress = parseFloat(reshapeMatch[1]);
+      }
+    }
+    
+    // Get detailed info
+    const detail = run(`mdadm --detail /dev/${name} 2>/dev/null`);
+    let uuid = null, arraySize = 0;
+    if (detail) {
+      const uuidMatch = detail.match(/UUID\s*:\s*(\S+)/);
+      if (uuidMatch) uuid = uuidMatch[1];
+      const sizeMatch = detail.match(/Array Size\s*:\s*(\d+)/);
+      if (sizeMatch) arraySize = parseInt(sizeMatch[1]) * 1024; // KB to bytes
+    }
+    
+    arrays.push({
+      name, level, status, progress, members, uuid,
+      totalBlocks, arraySize, arraySizeFormatted: formatBytes(arraySize),
+    });
+  }
+  
+  return arrays;
+}
+
+// Get pool info (RAID arrays that are mounted as nimbus pools)
+function getStoragePools() {
+  const config = getStorageConfig();
+  const raids = getRAIDStatus();
+  const pools = [];
+  
+  for (const poolConf of (config.pools || [])) {
+    const raid = raids.find(r => r.name === poolConf.arrayName);
+    const mountInfo = run(`df -B1 --output=size,used,avail ${poolConf.mountPoint} 2>/dev/null`);
+    
+    let total = 0, used = 0, available = 0;
+    if (mountInfo) {
+      const lines = mountInfo.trim().split('\n');
+      if (lines.length > 1) {
+        const parts = lines[1].trim().split(/\s+/);
+        total = parseInt(parts[0]) || 0;
+        used = parseInt(parts[1]) || 0;
+        available = parseInt(parts[2]) || 0;
+      }
+    }
+    
+    pools.push({
+      name: poolConf.name,
+      arrayName: poolConf.arrayName,
+      arrayPath: `/dev/${poolConf.arrayName}`,
+      mountPoint: poolConf.mountPoint,
+      raidLevel: poolConf.raidLevel,
+      filesystem: poolConf.filesystem || 'ext4',
+      createdAt: poolConf.createdAt,
+      disks: poolConf.disks || [],
+      status: raid ? raid.status : 'unknown',
+      rebuildProgress: raid ? raid.progress : null,
+      members: raid ? raid.members : [],
+      total, used, available,
+      totalFormatted: formatBytes(total),
+      usedFormatted: formatBytes(used),
+      availableFormatted: formatBytes(available),
+      usagePercent: total > 0 ? Math.round((used / total) * 100) : 0,
+      isPrimary: poolConf.name === config.primaryPool,
+    });
+  }
+  
+  return pools;
+}
+
+// Create a new RAID pool
+function createPool(name, disks, level, filesystem = 'ext4') {
+  // Validate name
+  if (!name || !/^[a-zA-Z0-9-]{1,32}$/.test(name)) {
+    return { error: 'Invalid pool name. Use alphanumeric + hyphens, max 32 chars.' };
+  }
+  const reserved = ['system', 'config', 'temp', 'swap', 'root', 'boot'];
+  if (reserved.includes(name.toLowerCase())) {
+    return { error: `"${name}" is a reserved name.` };
+  }
+  
+  // Check name not taken
+  const config = getStorageConfig();
+  if ((config.pools || []).find(p => p.name === name)) {
+    return { error: `Pool "${name}" already exists.` };
+  }
+  
+  // Validate disks
+  if (!disks || !Array.isArray(disks) || disks.length < 1) {
+    return { error: 'At least 1 disk required.' };
+  }
+  
+  // Validate RAID level vs disk count
+  const levelInt = parseInt(level);
+  const isSingleDisk = disks.length === 1;
+  
+  if (!isSingleDisk) {
+    const minDisks = { 0: 2, 1: 2, 5: 3, 6: 4, 10: 4 };
+    if (minDisks[levelInt] === undefined) {
+      return { error: `Invalid RAID level: ${level}. Use 0, 1, 5, 6, or 10.` };
+    }
+    if (disks.length < minDisks[levelInt]) {
+      return { error: `RAID ${level} requires at least ${minDisks[levelInt]} disks. You selected ${disks.length}.` };
+    }
+    if (levelInt === 10 && disks.length % 2 !== 0) {
+      return { error: 'RAID 10 requires an even number of disks.' };
+    }
+  }
+  
+  // Validate filesystem
+  if (!['ext4', 'xfs'].includes(filesystem)) {
+    return { error: 'Filesystem must be ext4 or xfs.' };
+  }
+  
+  // Verify disks are eligible
+  const detected = detectStorageDisks();
+  const eligiblePaths = detected.eligible.map(d => d.path);
+  for (const disk of disks) {
+    if (!eligiblePaths.includes(disk)) {
+      return { error: `Disk ${disk} is not eligible for pool creation.` };
+    }
+  }
+  
+  // Find next available md device
+  const raids = getRAIDStatus();
+  const usedMds = raids.map(r => parseInt(r.name.replace('md', '')));
+  let mdNum = 0;
+  while (usedMds.includes(mdNum)) mdNum++;
+  const mdName = `md${mdNum}`;
+  const mdPath = `/dev/${mdName}`;
+  const mountPoint = `${NIMBUS_POOLS_DIR}/${name}`;
+  
+  try {
+    // 1. Partition each disk
+    for (const disk of disks) {
+      execSync(`sgdisk -Z ${disk} 2>/dev/null || true`, { timeout: 10000 });
+      execSync(`sgdisk -n 1:0:0 -t 1:FD00 -c 1:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
+    }
+    execSync(`partprobe ${disks.join(' ')} 2>/dev/null || true`, { timeout: 10000 });
+    
+    // Wait for partitions to appear
+    execSync('sleep 2');
+    
+    const partitions = disks.map(d => `${d}1`);
+    
+    // 2. Create RAID array (or single disk)
+    if (isSingleDisk) {
+      // Single disk: no RAID, just format the partition directly
+      const mkfsCmd = filesystem === 'xfs' 
+        ? `mkfs.xfs -f -L nimbus-${name} ${partitions[0]}`
+        : `mkfs.ext4 -F -L nimbus-${name} ${partitions[0]}`;
+      execSync(mkfsCmd, { timeout: 120000 });
+      
+      // Mount
+      execSync(`mkdir -p ${mountPoint}`, { timeout: 5000 });
+      execSync(`mount ${partitions[0]} ${mountPoint}`, { timeout: 10000 });
+      
+      // fstab
+      const uuid = run(`blkid -s UUID -o value ${partitions[0]}`) || '';
+      execSync(`echo "UUID=${uuid.trim()} ${mountPoint} ${filesystem} defaults,noatime 0 2" >> /etc/fstab`);
+      
+    } else {
+      // RAID array
+      const raidLevel = levelInt === 10 ? '10' : `${levelInt}`;
+      const mdadmCmd = `mdadm --create ${mdPath} --level=${raidLevel} --raid-devices=${disks.length} --metadata=1.2 --run ${partitions.join(' ')}`;
+      execSync(mdadmCmd, { timeout: 30000 });
+      
+      // Format
+      const mkfsCmd = filesystem === 'xfs'
+        ? `mkfs.xfs -f -L nimbus-${name} ${mdPath}`
+        : `mkfs.ext4 -F -L nimbus-${name} ${mdPath}`;
+      execSync(mkfsCmd, { timeout: 120000 });
+      
+      // Mount
+      execSync(`mkdir -p ${mountPoint}`, { timeout: 5000 });
+      execSync(`mount ${mdPath} ${mountPoint}`, { timeout: 10000 });
+      
+      // fstab + mdadm config
+      const uuid = run(`blkid -s UUID -o value ${mdPath}`) || '';
+      execSync(`echo "UUID=${uuid.trim()} ${mountPoint} ${filesystem} defaults,noatime 0 2" >> /etc/fstab`);
+      execSync('mdadm --detail --scan > /etc/mdadm/mdadm.conf 2>/dev/null || true');
+      execSync('update-initramfs -u 2>/dev/null || true', { timeout: 60000 });
+    }
+    
+    // 3. Create directory structure
+    const dirs = ['docker/containers', 'docker/stacks', 'docker/volumes', 'shares', 'system-backup/config', 'system-backup/snapshots'];
+    for (const dir of dirs) {
+      execSync(`mkdir -p ${mountPoint}/${dir}`);
+    }
+    
+    // 4. Save pool config
+    const isFirstPool = !config.pools || config.pools.length === 0;
+    if (!config.pools) config.pools = [];
+    config.pools.push({
+      name,
+      arrayName: isSingleDisk ? null : mdName,
+      mountPoint,
+      raidLevel: isSingleDisk ? 'single' : `raid${levelInt}`,
+      filesystem,
+      disks,
+      createdAt: new Date().toISOString(),
+    });
+    if (isFirstPool) {
+      config.primaryPool = name;
+      config.configuredAt = new Date().toISOString();
+    }
+    saveStorageConfig(config);
+    
+    // 5. If first pool, configure Docker path
+    if (isFirstPool) {
+      const dockerConfig = getDockerConfig();
+      dockerConfig.installed = true;
+      dockerConfig.dockerAvailable = isDockerInstalled();
+      dockerConfig.path = `${mountPoint}/docker`;
+      dockerConfig.permissions = [];
+      dockerConfig.installedAt = new Date().toISOString();
+      saveDockerConfig(dockerConfig);
+      
+      // Initial config backup
+      backupConfigToPool(mountPoint);
+    }
+    
+    console.log(`[Storage] Pool "${name}" created at ${mountPoint} (${isSingleDisk ? 'single disk' : 'RAID ' + levelInt})`);
+    
+    return {
+      ok: true,
+      pool: { name, mountPoint, raidLevel: isSingleDisk ? 'single' : `raid${levelInt}`, disks },
+      isFirstPool,
+    };
+    
+  } catch (err) {
+    console.error('[Storage] Pool creation failed:', err.message);
+    return { error: 'Pool creation failed: ' + err.message };
+  }
+}
+
+// Backup config files to pool
+function backupConfigToPool(mountPoint) {
+  if (!mountPoint) {
+    const config = getStorageConfig();
+    if (!config.primaryPool) return;
+    const pool = (config.pools || []).find(p => p.name === config.primaryPool);
+    if (!pool) return;
+    mountPoint = pool.mountPoint;
+  }
+  
+  const backupDir = path.join(mountPoint, 'system-backup', 'config');
+  const snapshotDir = path.join(mountPoint, 'system-backup', 'snapshots', 
+    new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19));
+  
+  try {
+    execSync(`mkdir -p ${backupDir} ${snapshotDir}`);
+    
+    // Copy current configs
+    const files = ['users.json', 'shares.json', 'docker.json', 'installed-apps.json', 'storage.json'];
+    for (const file of files) {
+      const src = path.join(CONFIG_DIR, file);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(backupDir, file));
+        fs.copyFileSync(src, path.join(snapshotDir, file));
+      }
+    }
+    
+    // Keep only last 5 snapshots
+    const snapshotsBase = path.join(mountPoint, 'system-backup', 'snapshots');
+    const snapshots = fs.readdirSync(snapshotsBase).sort().reverse();
+    for (let i = 5; i < snapshots.length; i++) {
+      execSync(`rm -rf "${path.join(snapshotsBase, snapshots[i])}"`);
+    }
+    
+    console.log('[Storage] Config backed up to pool');
+  } catch (err) {
+    console.error('[Storage] Backup failed:', err.message);
+  }
+}
+
+// Detect existing NIMBUS pools (for re-import after reinstall)
+function detectExistingPools() {
+  const found = [];
+  
+  // Scan for NIMBUS-DATA labels
+  const blkid = run('blkid 2>/dev/null') || '';
+  const nimbusPartitions = [];
+  for (const line of blkid.split('\n')) {
+    if (line.includes('NIMBUS-DATA')) {
+      const devMatch = line.match(/^(\/dev\/\S+):/);
+      if (devMatch) nimbusPartitions.push(devMatch[1]);
+    }
+  }
+  
+  if (nimbusPartitions.length === 0) return found;
+  
+  // Try to assemble arrays
+  execSync('mdadm --assemble --scan 2>/dev/null || true', { timeout: 15000 });
+  
+  // Check assembled arrays
+  const raids = getRAIDStatus();
+  for (const raid of raids) {
+    // Check if this array has a nimbus label
+    const label = run(`blkid -s LABEL -o value /dev/${raid.name} 2>/dev/null`) || '';
+    if (label.trim().startsWith('nimbus-')) {
+      const poolName = label.trim().replace('nimbus-', '');
+      
+      // Check for system-backup
+      const tmpMount = `/tmp/nimbus-import-${raid.name}`;
+      let hasBackup = false;
+      try {
+        execSync(`mkdir -p ${tmpMount} && mount -o ro /dev/${raid.name} ${tmpMount} 2>/dev/null`, { timeout: 10000 });
+        hasBackup = fs.existsSync(path.join(tmpMount, 'system-backup', 'config'));
+        execSync(`umount ${tmpMount} 2>/dev/null || true`);
+      } catch {}
+      
+      found.push({
+        arrayName: raid.name,
+        poolName,
+        raidLevel: raid.level,
+        status: raid.status,
+        members: raid.members,
+        arraySize: raid.arraySize,
+        arraySizeFormatted: raid.arraySizeFormatted,
+        hasConfigBackup: hasBackup,
+      });
+    }
+  }
+  
+  return found;
+}
+
+// Storage monitoring - check RAID health and disk temps
+let storageAlerts = [];
+
+function checkStorageHealth() {
+  const alerts = [];
+  const raids = getRAIDStatus();
+  const pools = getStoragePools();
+  
+  // Check RAID status
+  for (const raid of raids) {
+    if (raid.status === 'degraded') {
+      alerts.push({ severity: 'critical', type: 'raid_degraded', array: raid.name, 
+        message: `RAID array ${raid.name} is DEGRADED - a disk has failed` });
+    }
+    if (raid.status === 'rebuilding') {
+      alerts.push({ severity: 'warning', type: 'raid_rebuilding', array: raid.name,
+        message: `RAID array ${raid.name} is rebuilding (${raid.progress}%)` });
+    }
+  }
+  
+  // Check pool usage
+  for (const pool of pools) {
+    if (pool.usagePercent >= 95) {
+      alerts.push({ severity: 'critical', type: 'pool_full', pool: pool.name,
+        message: `Pool "${pool.name}" is ${pool.usagePercent}% full` });
+    } else if (pool.usagePercent >= 85) {
+      alerts.push({ severity: 'warning', type: 'pool_warning', pool: pool.name,
+        message: `Pool "${pool.name}" is ${pool.usagePercent}% full` });
+    }
+  }
+  
+  // Check disk temps
+  const detected = detectStorageDisks();
+  const allDisks = [...detected.eligible, ...detected.provisioned, ...detected.boot];
+  for (const disk of allDisks) {
+    if (disk.temperature && disk.temperature > 60) {
+      alerts.push({ severity: 'critical', type: 'disk_hot', disk: disk.path,
+        message: `Disk ${disk.model} is at ${disk.temperature}C - dangerously hot` });
+    } else if (disk.temperature && disk.temperature > 50) {
+      alerts.push({ severity: 'warning', type: 'disk_warm', disk: disk.path,
+        message: `Disk ${disk.model} is at ${disk.temperature}C - running warm` });
+    }
+  }
+  
+  storageAlerts = alerts;
+  return alerts;
+}
+
+// Start storage monitoring interval
+setInterval(checkStorageHealth, 60000); // Every 60s
+setInterval(() => { if (hasPool()) backupConfigToPool(); }, 6 * 60 * 60 * 1000); // Every 6h
+
 const routes = {
   '/api/system': () => getCachedSystem(),
   '/api/cpu': () => getCpuUsage(),
@@ -3660,6 +4228,11 @@ const routes = {
   '/api/gpu': () => getGpu(),
   '/api/temps': () => getTemps(),
   '/api/network': () => getNetwork(),
+  '/api/storage/disks': () => detectStorageDisks(),
+  '/api/storage/pools': () => getStoragePools(),
+  '/api/storage/status': () => ({ pools: getStoragePools(), alerts: storageAlerts, hasPool: hasPool() }),
+  '/api/storage/alerts': () => ({ alerts: storageAlerts }),
+  '/api/storage/detect-existing': () => ({ pools: detectExistingPools() }),
   '/api/disks': () => getDisks(),
   '/api/uptime': () => ({ uptime: getUptime() }),
   '/api/containers': () => getContainers(),
@@ -4075,6 +4648,104 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ── Storage Manager routes (POST) ──
+  if (url.startsWith('/api/storage/') && ['POST', 'DELETE'].includes(method)) {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') {
+      res.writeHead(401, CORS_HEADERS);
+      return res.end(JSON.stringify({ error: 'Unauthorized - admin required' }));
+    }
+    
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        let result = null;
+        
+        // POST /api/storage/pool — create pool
+        if (url === '/api/storage/pool' && method === 'POST') {
+          const { name, disks, level, filesystem } = parsed;
+          result = createPool(name, disks, level, filesystem);
+        }
+        
+        // POST /api/storage/scan — rescan disks
+        else if (url === '/api/storage/scan' && method === 'POST') {
+          diskCache = null; // Clear disk cache
+          result = { ok: true, disks: detectStorageDisks() };
+        }
+        
+        // POST /api/storage/reimport — re-import existing pools
+        else if (url === '/api/storage/reimport' && method === 'POST') {
+          const { pools: poolsToImport } = parsed;
+          if (!poolsToImport || !Array.isArray(poolsToImport)) {
+            result = { error: 'Provide pools array to import' };
+          } else {
+            const config = getStorageConfig();
+            const imported = [];
+            for (const pool of poolsToImport) {
+              const mountPoint = `${NIMBUS_POOLS_DIR}/${pool.poolName}`;
+              try {
+                execSync(`mkdir -p ${mountPoint}`);
+                execSync(`mount /dev/${pool.arrayName} ${mountPoint}`, { timeout: 10000 });
+                const uuid = run(`blkid -s UUID -o value /dev/${pool.arrayName}`) || '';
+                execSync(`echo "UUID=${uuid.trim()} ${mountPoint} ext4 defaults,noatime 0 2" >> /etc/fstab`);
+                
+                if (!config.pools) config.pools = [];
+                config.pools.push({
+                  name: pool.poolName,
+                  arrayName: pool.arrayName,
+                  mountPoint,
+                  raidLevel: pool.raidLevel,
+                  filesystem: 'ext4',
+                  disks: pool.members.map(m => m.device),
+                  createdAt: new Date().toISOString(),
+                  imported: true,
+                });
+                if (!config.primaryPool) config.primaryPool = pool.poolName;
+                imported.push(pool.poolName);
+              } catch (err) {
+                console.error(`[Storage] Failed to import ${pool.poolName}:`, err.message);
+              }
+            }
+            saveStorageConfig(config);
+            
+            // Restore config backup if available
+            if (imported.length > 0) {
+              const primaryMount = `${NIMBUS_POOLS_DIR}/${imported[0]}`;
+              const backupConfig = path.join(primaryMount, 'system-backup', 'config');
+              if (fs.existsSync(backupConfig)) {
+                result = { ok: true, imported, hasConfigBackup: true };
+              } else {
+                result = { ok: true, imported, hasConfigBackup: false };
+              }
+            } else {
+              result = { error: 'No pools imported successfully' };
+            }
+          }
+        }
+        
+        // POST /api/storage/backup — force config backup
+        else if (url === '/api/storage/backup' && method === 'POST') {
+          backupConfigToPool();
+          result = { ok: true };
+        }
+        
+        if (result === null) {
+          res.writeHead(404, CORS_HEADERS);
+          return res.end(JSON.stringify({ error: 'Not found' }));
+        }
+        
+        res.writeHead(result.error ? 400 : 200, CORS_HEADERS);
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, CORS_HEADERS);
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   // ── System Update routes ──
   if (url.startsWith('/api/system/update')) {
     const session = getSessionUser(req);
@@ -4246,6 +4917,31 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Endpoints:`);
   Object.keys(routes).forEach(r => console.log(`    GET ${r}`));
   console.log(`\n  Auto-detecting hardware...`);
+
+  // Auto-configure Docker if installed but not configured
+  try {
+    const dockerConfig = getDockerConfig();
+    if (!dockerConfig.installed && isDockerInstalled()) {
+      const defaultPath = path.join(NIMBUS_ROOT, 'volumes', 'docker');
+      const containersPath = path.join(defaultPath, 'containers');
+      const volumesPath = path.join(defaultPath, 'volumes');
+      const stacksPath = path.join(defaultPath, 'stacks');
+      fs.mkdirSync(containersPath, { recursive: true });
+      fs.mkdirSync(volumesPath, { recursive: true });
+      fs.mkdirSync(stacksPath, { recursive: true });
+      dockerConfig.installed = true;
+      dockerConfig.dockerAvailable = true;
+      dockerConfig.path = defaultPath;
+      dockerConfig.permissions = [];
+      dockerConfig.installedAt = new Date().toISOString();
+      saveDockerConfig(dockerConfig);
+      console.log(`    Docker: Auto-configured at ${defaultPath}`);
+    } else if (dockerConfig.installed) {
+      console.log(`    Docker: Configured at ${dockerConfig.path}`);
+    }
+  } catch (err) {
+    console.log(`    Docker: Auto-config failed: ${err.message}`);
+  }
 
   // Initial detection log
   const summary = getSystemSummary();
