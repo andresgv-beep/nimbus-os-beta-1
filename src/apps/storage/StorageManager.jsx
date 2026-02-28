@@ -49,7 +49,7 @@ export default function StorageManager() {
   if (loading && !disks) return <div className={styles.layout}><div className={styles.main}><div style={{ padding: 40, color: 'var(--text-muted)' }}>Loading storage data...</div></div></div>;
 
   const hasPools = pools && pools.length > 0;
-  const allDisks = disks ? [...(disks.eligible||[]), ...(disks.provisioned||[]), ...(disks.boot||[]), ...(disks.nvme||[]), ...(disks.usb||[])] : [];
+  const allDisks = disks ? [...(disks.eligible||[]), ...(disks.provisioned||[]), ...(disks.nvme||[]), ...(disks.usb||[])] : [];
   const critAlerts = alerts.filter(a => a.severity === 'critical');
   const warnAlerts = alerts.filter(a => a.severity === 'warning');
 
@@ -162,6 +162,8 @@ function DiskItem({disk, color}) {
         <div className={styles.diskName}>{disk.path} — {disk.model}</div>
         <div className={styles.diskDetail}>
           {disk.serial&&`${disk.serial} · `}{disk.sizeFormatted} · {disk.classification==='hdd'?'HDD':disk.classification==='ssd'?'SSD':disk.classification} · {disk.transport}
+          {disk.isBoot?' · 🖥 Boot disk':''}
+          {disk.availableSpaceFormatted&&disk.isBoot?` · ${disk.availableSpaceFormatted} free`:''}
           {disk.temperature?` · ${disk.temperature}°C`:''}
           {disk.hasExistingData?' · ⚠ Has data':''}
         </div>
@@ -179,7 +181,6 @@ function DisksPage({disks, allDisks}) {
   const cats = [
     {title:'Available for Pools',items:disks?.eligible||[],color:'var(--accent-green)'},
     {title:'Pool Members',items:disks?.provisioned||[],color:'var(--accent)'},
-    {title:'Boot Disk',items:disks?.boot||[],color:'var(--accent-blue)'},
     {title:'NVMe (Cache Reserved)',items:disks?.nvme||[],color:'var(--text-muted)'},
     {title:'USB (External)',items:disks?.usb||[],color:'var(--text-muted)'},
   ].filter(c=>c.items.length>0);
@@ -283,8 +284,8 @@ function CreatePoolPage({disks, token, onCreated}) {
             style={{cursor:'pointer',border:selectedDisks.includes(d.path)?'1px solid var(--accent)':'1px solid transparent',borderRadius:8}}>
             <input type="checkbox" checked={selectedDisks.includes(d.path)} readOnly style={{marginRight:12}}/>
             <div className={styles.diskInfo}>
-              <div className={styles.diskName}>{d.path} — {d.model}</div>
-              <div className={styles.diskDetail}>{d.sizeFormatted} · {d.classification==='hdd'?'HDD':'SSD'}{d.hasExistingData?' · ⚠ HAS DATA':''}</div>
+              <div className={styles.diskName}>{d.path} — {d.model} {d.isBoot?'🖥 Boot':''}</div>
+              <div className={styles.diskDetail}>{d.isBoot?`${d.availableSpaceFormatted} available (of ${d.sizeFormatted})`:d.sizeFormatted} · {d.classification==='hdd'?'HDD':'SSD'}{d.hasExistingData?' · ⚠ HAS DATA':''}</div>
             </div>
             <div className={styles.statusBadge}>{d.smart==='PASSED'?<><CheckCircleIcon size={14} style={{color:'var(--accent-green)'}}/> OK</>:'—'}</div>
           </div>
