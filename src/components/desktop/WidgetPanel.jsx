@@ -167,6 +167,20 @@ function NetworkWidget({ data, live }) {
 // Disk Widget
 // ═══════════════════════════════════
 function DiskWidget({ data, live }) {
+  const [storageData, setStorageData] = useState(null);
+  
+  useEffect(() => {
+    const fetchStorage = async () => {
+      try {
+        const res = await fetch('/api/storage/status');
+        if (res.ok) setStorageData(await res.json());
+      } catch {}
+    };
+    fetchStorage();
+    const iv = setInterval(fetchStorage, 30000);
+    return () => clearInterval(iv);
+  }, []);
+
   if (!live || !data) {
     return (
       <div className={styles.widget}>
@@ -177,7 +191,9 @@ function DiskWidget({ data, live }) {
   }
 
   const { disks } = data;
-  const { disks: physicalDisks, mounts, raids } = disks;
+  const { disks: physicalDisks } = disks;
+  const pools = storageData?.pools || [];
+  const hasPool = storageData?.hasPool;
 
   return (
     <div className={styles.widget}>
@@ -194,20 +210,21 @@ function DiskWidget({ data, live }) {
           </div>
         </div>
       ))}
-      {raids.length > 0 && (
+      {pools.length > 0 && (
         <>
           <div className={styles.divider} />
-          {raids.map((r, i) => (
-            <Metric key={i} label={r.name} value={r.type.toUpperCase()} style={{ color: 'var(--accent-green)' }} />
+          {pools.map((p, i) => (
+            <div key={i}>
+              <Metric label={p.arrayName || p.name} value={p.raidLevel.toUpperCase()} style={{ color: p.status === 'active' ? 'var(--accent-green)' : '#f87171' }} />
+              <Bar label={p.mountPoint} value={`${p.usedFormatted} / ${p.totalFormatted}`} percent={p.usagePercent} color={p.usagePercent > 90 ? '#f87171' : 'var(--accent)'} />
+            </div>
           ))}
         </>
       )}
-      {mounts.length > 0 && (
+      {!hasPool && (
         <>
           <div className={styles.divider} />
-          {mounts.filter(m => m.mount === '/' || m.mount.startsWith('/volume') || m.mount.startsWith('/mnt') || m.mount.startsWith('/home')).slice(0, 4).map((m, i) => (
-            <Bar key={i} label={m.mount} value={`${m.usedFormatted} / ${m.totalFormatted}`} percent={m.percent} color="var(--accent)" />
-          ))}
+          <div className={styles.diskStatus} style={{ color: '#fbbf24', fontSize: '0.75rem' }}>No storage pool configured</div>
         </>
       )}
     </div>
