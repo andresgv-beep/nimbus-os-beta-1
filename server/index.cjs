@@ -4419,7 +4419,7 @@ function checkStorageHealth() {
   
   // Check disk temps
   const detected = detectStorageDisks();
-  const allDisks = [...detected.eligible, ...detected.provisioned, ...detected.boot];
+  const allDisks = [...detected.eligible, ...detected.provisioned];
   for (const disk of allDisks) {
     if (disk.temperature && disk.temperature > 60) {
       alerts.push({ severity: 'critical', type: 'disk_hot', disk: disk.path,
