@@ -166,20 +166,21 @@ function NetworkWidget({ data, live }) {
 // ═══════════════════════════════════
 // Disk Widget
 // ═══════════════════════════════════
-function DiskWidget({ data, live }) {
+function DiskWidget({ data, live, token }) {
   const [storageData, setStorageData] = useState(null);
   
   useEffect(() => {
+    if (!token) return;
     const fetchStorage = async () => {
       try {
-        const res = await fetch('/api/storage/status');
+        const res = await fetch('/api/storage/status', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) setStorageData(await res.json());
       } catch {}
     };
     fetchStorage();
     const iv = setInterval(fetchStorage, 30000);
     return () => clearInterval(iv);
-  }, []);
+  }, [token]);
 
   if (!live || !data) {
     return (
@@ -275,7 +276,7 @@ export default function WidgetPanel() {
     <div className={styles.panel} style={panelStyle}>
       {visibleWidgets.system && <SystemWidget data={data} live={live} />}
       {visibleWidgets.network && <NetworkWidget data={data} live={live} />}
-      {visibleWidgets.disk && <DiskWidget data={data} live={live} />}
+      {visibleWidgets.disk && <DiskWidget data={data} live={live} token={token} />}
       {visibleWidgets.notifications && <NotifWidget />}
     </div>
   );
