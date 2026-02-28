@@ -1355,23 +1355,33 @@ function handleDocker(url, method, body, req) {
     if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
     
     const { path: dockerPath, permissions } = body;
-    if (!dockerPath) return { error: 'Docker path required' };
     
-    // Determine full path
-    const fullPath = dockerPath.startsWith('/') ? dockerPath : path.join(NIMBUS_ROOT, 'volumes', dockerPath);
+    // Determine full path — use pool if available
+    let fullPath;
+    const storageConf = getStorageConfig();
+    const primaryPool = (storageConf.pools || []).find(p => p.name === storageConf.primaryPool);
+    
+    if (dockerPath && dockerPath.startsWith('/')) {
+      // Explicit absolute path provided
+      fullPath = dockerPath;
+    } else if (primaryPool) {
+      // Use primary pool's docker directory
+      fullPath = path.join(primaryPool.mountPoint, 'docker');
+    } else {
+      return { error: 'No storage pool available. Create a pool in Storage Manager first.' };
+    }
+    
     const containersPath = path.join(fullPath, 'containers');
     const volumesPath = path.join(fullPath, 'volumes');
     const stacksPath = path.join(fullPath, 'stacks');
     
-    // Check if parent directory exists for absolute paths
-    if (dockerPath.startsWith('/')) {
-      const parentDir = path.dirname(fullPath);
-      if (!fs.existsSync(parentDir)) {
-        return { 
-          error: 'El directorio padre no existe', 
-          detail: `No se puede crear ${fullPath} porque ${parentDir} no existe.`
-        };
-      }
+    // Check if parent directory exists
+    const parentDir = path.dirname(fullPath);
+    if (!fs.existsSync(parentDir)) {
+      return { 
+        error: 'Parent directory does not exist', 
+        detail: `Cannot create ${fullPath} because ${parentDir} does not exist.`
+      };
     }
     
     // Create directories
@@ -1403,7 +1413,8 @@ function handleDocker(url, method, body, req) {
         displayName: 'Docker',
         description: 'Docker containers and data',
         path: fullPath,
-        volume: 'volume1',
+        volume: primaryPool ? primaryPool.name : 'system',
+        pool: primaryPool ? primaryPool.name : null,
         created: new Date().toISOString(),
         createdBy: session.username,
         recycleBin: false,
@@ -5190,7 +5201,85 @@ server.listen(PORT, '0.0.0.0', () => {
       // Initial config backup
       backupConfigToPool();
     } else {
-      console.log(`    Storage: No pools configured (locked mode)`);
+      // No config — try to detect existing RAID arrays (e.g. after reinstall)
+      console.log(`    Storage: No pools configured, scanning for existing arrays...`);
+      const existing = detectExistingPools();
+      if (existing.length > 0) {
+        console.log(`    Storage: Found ${existing.length} existing pool(s)! Auto-importing...`);
+        const config = getStorageConfig();
+        config.pools = config.pools || [];
+        
+        for (const pool of existing) {
+          const mountPoint = `${NIMBUS_POOLS_DIR}/${pool.poolName}`;
+          try {
+            execSync(`mkdir -p ${mountPoint}`, { timeout: 5000 });
+            // Array already assembled by detectExistingPools, just mount
+            const isMounted = run(`mountpoint -q ${mountPoint} 2>/dev/null && echo yes || echo no`);
+            if (!isMounted || isMounted.trim() !== 'yes') {
+              execSync(`mount /dev/${pool.arrayName} ${mountPoint}`, { timeout: 10000 });
+            }
+            
+            // Add to fstab
+            const uuid = run(`blkid -s UUID -o value /dev/${pool.arrayName}`) || '';
+            if (uuid.trim()) {
+              // Check if already in fstab
+              const fstab = readFile('/etc/fstab') || '';
+              if (!fstab.includes(uuid.trim())) {
+                execSync(`echo "UUID=${uuid.trim()} ${mountPoint} ext4 defaults,noatime 0 2" >> /etc/fstab`);
+              }
+            }
+            
+            // Determine disk paths from members
+            const diskPaths = (pool.members || []).map(m => {
+              const devName = m.device || m;
+              // Convert partition path to disk path (sda1 -> /dev/sda)
+              const diskName = typeof devName === 'string' ? devName.replace(/\d+$/, '') : devName;
+              return diskName.startsWith('/dev/') ? diskName : `/dev/${diskName}`;
+            });
+            
+            config.pools.push({
+              name: pool.poolName,
+              arrayName: pool.arrayName,
+              mountPoint,
+              raidLevel: pool.raidLevel,
+              filesystem: 'ext4',
+              disks: diskPaths,
+              createdAt: new Date().toISOString(),
+              imported: true,
+            });
+            
+            if (!config.primaryPool) config.primaryPool = pool.poolName;
+            console.log(`    Storage: Auto-imported pool "${pool.poolName}" at ${mountPoint}`);
+            
+            // Restore config backup if available
+            const backupConfig = path.join(mountPoint, 'system-backup', 'config');
+            if (fs.existsSync(backupConfig)) {
+              console.log(`    Storage: Config backup found, restoring...`);
+              const configDir = path.join(process.env.HOME || '/root', '.nimbusos', 'config');
+              try {
+                // Copy backed up configs (except storage.json which we just created)
+                const backupFiles = fs.readdirSync(backupConfig);
+                for (const file of backupFiles) {
+                  if (file === 'storage.json') continue; // Don't overwrite what we just created
+                  const src = path.join(backupConfig, file);
+                  const dst = path.join(configDir, file);
+                  fs.copyFileSync(src, dst);
+                  console.log(`    Storage: Restored ${file}`);
+                }
+              } catch (restoreErr) {
+                console.log(`    Storage: Config restore failed: ${restoreErr.message}`);
+              }
+            }
+          } catch (err) {
+            console.error(`    Storage: Failed to auto-import ${pool.poolName}: ${err.message}`);
+          }
+        }
+        
+        saveStorageConfig(config);
+        console.log(`    Storage: Auto-import complete. ${config.pools.length} pool(s) active.`);
+      } else {
+        console.log(`    Storage: No existing pools found (locked mode)`);
+      }
     }
   } catch (err) {
     console.log(`    Storage: Startup check failed: ${err.message}`);
