@@ -151,14 +151,16 @@ function AppearancePage() {
           perfLevel, perfIsManual, gpuInfo, setPerfLevel, resetPerfLevel,
           setTheme, setAccentColor,
           setGlowIntensity } = useTheme();
+  const { token } = useAuth();
   
   const [serverGpu, setServerGpu] = useState(null);
   useEffect(() => {
-    fetch('/api/hardware/gpu-info')
+    if (!token) return;
+    fetch('/api/hardware/gpu-info', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setServerGpu(data); })
       .catch(() => {});
-  }, []);
+  }, [token]);
 
   const TEXT_SIZES = [
     { value: 75, label: 'XS' },
