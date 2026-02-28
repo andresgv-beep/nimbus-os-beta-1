@@ -78,8 +78,8 @@ export default function StorageManager() {
 
         {!hasPools && view!=='create' && <NoPools onCreateClick={()=>setView('create')} eligible={(disks?.eligible||[]).length}/>}
         {view==='overview' && hasPools && <OverviewPage pools={pools} allDisks={allDisks}/>}
-        {view==='disks' && <DisksPage disks={disks} allDisks={allDisks}/>}
-        {view==='pools' && <PoolsPage pools={pools}/>}
+        {view==='disks' && <DisksPage disks={disks} allDisks={allDisks} token={token} onRefresh={fetchData}/>}
+        {view==='pools' && <PoolsPage pools={pools} token={token} onRefresh={fetchData}/>}
         {view==='smart' && <SmartPage allDisks={allDisks}/>}
         {view==='create' && <CreatePoolPage disks={disks} token={token} onCreated={()=>{setView('overview');fetchData();}}/>}
       </div>
@@ -154,20 +154,29 @@ function PoolCard({pool}) {
   );
 }
 
-function DiskItem({disk, color}) {
+function DiskItem({disk, color, onWipe}) {
   return (
     <div className={styles.diskItem}>
       <div className={styles.diskIcon} style={{background:`${color}15`,color}}><HardDriveIcon size={22}/></div>
       <div className={styles.diskInfo}>
-        <div className={styles.diskName}>{disk.path} — {disk.model}</div>
+        <div className={styles.diskName}>
+          {disk.path} — {disk.model}
+          {disk.poolName && <span style={{color:'var(--accent)',marginLeft:8,fontSize:'var(--text-xs)'}}>Pool: {disk.poolName}</span>}
+        </div>
         <div className={styles.diskDetail}>
           {disk.serial&&`${disk.serial} · `}{disk.sizeFormatted} · {disk.classification==='hdd'?'HDD':disk.classification==='ssd'?'SSD':disk.classification} · {disk.transport}
           {disk.isBoot?' · 🖥 Boot disk':''}
           {disk.availableSpaceFormatted&&disk.isBoot?` · ${disk.availableSpaceFormatted} free`:''}
           {disk.temperature?` · ${disk.temperature}°C`:''}
-          {disk.hasExistingData?' · ⚠ Has data':''}
+          {disk.hasRaidSuperblock?' · ⚠ RAID superblock':''}
+          {disk.hasExistingData&&!disk.hasRaidSuperblock?' · ⚠ Has data':''}
         </div>
       </div>
+      {disk.needsWipe && !disk.isBoot && onWipe && (
+        <button onClick={()=>onWipe(disk)} className={styles.btn} style={{fontSize:'var(--text-xs)',padding:'4px 10px',color:'#fbbf24',borderColor:'rgba(251,191,36,0.3)'}}>
+          Wipe
+        </button>
+      )}
       <div className={styles.statusBadge}>
         {disk.smart==='PASSED'?<><CheckCircleIcon size={14} style={{color:'var(--accent-green)'}}/> Healthy</>:
          disk.smart==='FAILED'?<><XCircleIcon size={14} style={{color:'#f87171'}}/> FAILED</>:
@@ -177,7 +186,29 @@ function DiskItem({disk, color}) {
   );
 }
 
-function DisksPage({disks, allDisks}) {
+function DisksPage({disks, allDisks, token, onRefresh}) {
+  const [wiping, setWiping] = useState(null);
+  const [wipeConfirm, setWipeConfirm] = useState(null);
+  const [wipeInput, setWipeInput] = useState('');
+  const [wipeError, setWipeError] = useState('');
+
+  const doWipe = async () => {
+    if (wipeInput !== wipeConfirm.name.replace('/dev/','')) { setWipeError('Type the disk name to confirm'); return; }
+    setWiping(wipeConfirm.path);
+    setWipeError('');
+    try {
+      const res = await fetch('/api/storage/wipe', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({disk: wipeConfirm.path})
+      });
+      const data = await res.json();
+      if (data.error) setWipeError(data.error);
+      else { setWipeConfirm(null); setWipeInput(''); if (onRefresh) onRefresh(); }
+    } catch { setWipeError('Wipe failed'); }
+    setWiping(null);
+  };
+
   const cats = [
     {title:'Available for Pools',items:disks?.eligible||[],color:'var(--accent-green)'},
     {title:'Pool Members',items:disks?.provisioned||[],color:'var(--accent)'},
@@ -189,16 +220,86 @@ function DisksPage({disks, allDisks}) {
     <div className={styles.sectionHeader}><h3>Physical Disks ({allDisks.length})</h3></div>
     {cats.map(cat=>(<div key={cat.title}>
       <div style={{color:'var(--text-muted)',fontSize:'var(--text-sm)',margin:'16px 0 8px',fontWeight:600}}>{cat.title}</div>
-      {cat.items.map((d,i)=><DiskItem key={i} disk={d} color={cat.color}/>)}
+      {cat.items.map((d,i)=><DiskItem key={i} disk={d} color={cat.color} onWipe={d=>setWipeConfirm(d)}/>)}
     </div>))}
+
+    {wipeConfirm&&(
+      <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+        <div style={{background:'var(--surface-glass,#1a1a2e)',borderRadius:12,padding:32,maxWidth:480,width:'90%',border:'1px solid rgba(251,191,36,0.3)'}}>
+          <h3 style={{color:'#fbbf24',marginBottom:12}}>⚠ Wipe Disk</h3>
+          <p style={{color:'var(--text-muted)',marginBottom:8}}>This will remove all partitions, RAID superblocks, and LVM metadata from:</p>
+          <p style={{color:'var(--text-primary)',fontWeight:600,marginBottom:16}}>{wipeConfirm.path} — {wipeConfirm.model} ({wipeConfirm.sizeFormatted})</p>
+          <p style={{color:'var(--text-muted)',marginBottom:4,fontSize:'var(--text-sm)'}}>Type <strong style={{color:'var(--text-primary)'}}>{wipeConfirm.name.replace('/dev/','')}</strong> to confirm:</p>
+          {wipeError&&<p style={{color:'#f87171',fontSize:'var(--text-sm)',marginBottom:8}}>{wipeError}</p>}
+          <input type="text" value={wipeInput} onChange={e=>setWipeInput(e.target.value)} autoFocus placeholder={wipeConfirm.name.replace('/dev/','')}
+            style={{width:'100%',padding:'8px 12px',borderRadius:6,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(0,0,0,0.3)',color:'var(--text-primary)',fontSize:'var(--text-sm)',marginBottom:16,boxSizing:'border-box'}}/>
+          <div style={{display:'flex',gap:12,justifyContent:'flex-end'}}>
+            <button className={styles.btn} onClick={()=>{setWipeConfirm(null);setWipeInput('');setWipeError('');}}>Cancel</button>
+            <button className={styles.btnPrimary} onClick={doWipe} disabled={wipeInput!==wipeConfirm.name.replace('/dev/','')||wiping}
+              style={{background:wipeInput===wipeConfirm.name.replace('/dev/','')?'#d97706':'rgba(217,119,6,0.3)'}}>
+              {wiping?'Wiping...':'Wipe Disk'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </div>);
 }
 
-function PoolsPage({pools}) {
+function PoolsPage({pools, token, onRefresh}) {
+  const [destroyConfirm, setDestroyConfirm] = useState(null);
+  const [destroyInput, setDestroyInput] = useState('');
+  const [destroying, setDestroying] = useState(false);
+  const [destroyError, setDestroyError] = useState('');
+
+  const doDestroy = async () => {
+    if (destroyInput !== destroyConfirm.name) { setDestroyError('Type the pool name to confirm'); return; }
+    setDestroying(true); setDestroyError('');
+    try {
+      const res = await fetch('/api/storage/pool/destroy', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':`Bearer ${token}`},
+        body: JSON.stringify({name: destroyConfirm.name})
+      });
+      const data = await res.json();
+      if (data.error) setDestroyError(data.error);
+      else { setDestroyConfirm(null); setDestroyInput(''); if (onRefresh) onRefresh(); }
+    } catch { setDestroyError('Destroy failed'); }
+    setDestroying(false);
+  };
+
   if (!pools.length) return <div style={{color:'var(--text-muted)',padding:20}}>No pools created yet.</div>;
   return (<div>
     <div className={styles.sectionHeader}><h3>Storage Pools ({pools.length})</h3></div>
-    {pools.map(p=><PoolCard key={p.name} pool={p}/>)}
+    {pools.map(p=>(
+      <div key={p.name}>
+        <PoolCard pool={p}/>
+        <div style={{display:'flex',gap:8,padding:'0 0 16px',justifyContent:'flex-end'}}>
+          <button className={styles.btn} onClick={()=>{setDestroyConfirm(p);setDestroyInput('');setDestroyError('');}}
+            style={{fontSize:'var(--text-xs)',color:'#f87171',borderColor:'rgba(239,68,68,0.3)'}}>Destroy Pool</button>
+        </div>
+      </div>
+    ))}
+
+    {destroyConfirm&&(
+      <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+        <div style={{background:'var(--surface-glass,#1a1a2e)',borderRadius:12,padding:32,maxWidth:480,width:'90%',border:'1px solid rgba(239,68,68,0.3)'}}>
+          <h3 style={{color:'#f87171',marginBottom:12}}>⚠ Destroy Pool</h3>
+          <p style={{color:'var(--text-muted)',marginBottom:8}}>This will permanently destroy pool <strong style={{color:'var(--text-primary)'}}>{destroyConfirm.name}</strong>, unmount it, and remove the RAID array. All data will be lost.</p>
+          <p style={{color:'var(--text-muted)',marginBottom:4,fontSize:'var(--text-sm)'}}>Type <strong style={{color:'var(--text-primary)'}}>{destroyConfirm.name}</strong> to confirm:</p>
+          {destroyError&&<p style={{color:'#f87171',fontSize:'var(--text-sm)',marginBottom:8}}>{destroyError}</p>}
+          <input type="text" value={destroyInput} onChange={e=>setDestroyInput(e.target.value)} autoFocus placeholder={destroyConfirm.name}
+            style={{width:'100%',padding:'8px 12px',borderRadius:6,border:'1px solid rgba(255,255,255,0.1)',background:'rgba(0,0,0,0.3)',color:'var(--text-primary)',fontSize:'var(--text-sm)',marginBottom:16,boxSizing:'border-box'}}/>
+          <div style={{display:'flex',gap:12,justifyContent:'flex-end'}}>
+            <button className={styles.btn} onClick={()=>setDestroyConfirm(null)}>Cancel</button>
+            <button className={styles.btnPrimary} onClick={doDestroy} disabled={destroyInput!==destroyConfirm.name||destroying}
+              style={{background:destroyInput===destroyConfirm.name?'#dc2626':'rgba(220,38,38,0.3)'}}>
+              {destroying?'Destroying...':'Destroy Pool'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
   </div>);
 }
 
