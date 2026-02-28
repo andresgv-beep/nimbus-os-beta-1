@@ -151,6 +151,14 @@ function AppearancePage() {
           perfLevel, perfIsManual, gpuInfo, setPerfLevel, resetPerfLevel,
           setTheme, setAccentColor,
           setGlowIntensity } = useTheme();
+  
+  const [serverGpu, setServerGpu] = useState(null);
+  useEffect(() => {
+    fetch('/api/hardware/gpu-info')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setServerGpu(data); })
+      .catch(() => {});
+  }, []);
 
   const TEXT_SIZES = [
     { value: 75, label: 'XS' },
@@ -183,20 +191,30 @@ function AppearancePage() {
       <div className={styles.card}>
         <div className={styles.cardLabel}>
           Performance
-          {gpuInfo && (
+          {serverGpu?.gpus?.length > 0 ? (
+            <span className={styles.gpuBadge} style={{ color: 'var(--accent-green)' }}>
+              {serverGpu.gpus.length > 1 ? `${serverGpu.gpus.length} GPUs` : 'Dedicated GPU'}
+            </span>
+          ) : gpuInfo ? (
             <span className={styles.gpuBadge} style={{ color: gpuTierLabel.color }}>
               {gpuTierLabel.text}
             </span>
-          )}
+          ) : null}
         </div>
         
-        {/* GPU Info */}
-        {gpuInfo && (
+        {/* Server GPU Info (real hardware) */}
+        {serverGpu?.gpus?.length > 0 ? (
+          <div className={styles.gpuInfo}>
+            <span className={styles.gpuRenderer}>{serverGpu.gpus.map(g => g.description).join(' · ')}</span>
+            {serverGpu.currentDriver && <span className={styles.gpuAuto}>Driver: {serverGpu.currentDriver} {serverGpu.driverVersion || ''}</span>}
+            {!serverGpu.currentDriver && <span className={styles.gpuAuto}>No proprietary driver loaded</span>}
+          </div>
+        ) : gpuInfo ? (
           <div className={styles.gpuInfo}>
             <span className={styles.gpuRenderer}>{gpuInfo.renderer}</span>
             {!perfIsManual && <span className={styles.gpuAuto}>Auto-configured</span>}
           </div>
-        )}
+        ) : null}
 
         {/* Performance Level Selector */}
         <div className={styles.perfSelector}>
