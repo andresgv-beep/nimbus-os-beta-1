@@ -99,7 +99,7 @@ install_deps() {
   apt-get install -y -qq \
     curl wget git ca-certificates gnupg lsb-release \
     smartmontools hdparm lm-sensors \
-    mdadm \
+    mdadm gdisk \
     samba \
     ufw \
     avahi-daemon
