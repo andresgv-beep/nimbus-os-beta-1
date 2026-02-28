@@ -250,9 +250,10 @@ function SharedFoldersPage() {
   const [shares, setShares] = useState([]);
   const [users, setUsers] = useState([]);
   const [apps, setApps] = useState([]);
+  const [pools, setPools] = useState([]);
   const [showCreate, setShowCreate] = useState(false);
   const [editShare, setEditShare] = useState(null);
-  const [form, setForm] = useState({ name: '', description: '' });
+  const [form, setForm] = useState({ name: '', description: '', pool: '' });
   const [perms, setPerms] = useState({});
   const [appPerms, setAppPerms] = useState([]);
   const [error, setError] = useState('');
@@ -283,7 +284,15 @@ function SharedFoldersPage() {
     } catch {}
   }, [token]);
 
-  useEffect(() => { fetchShares(); fetchUsers(); fetchApps(); }, [fetchShares, fetchUsers, fetchApps]);
+  const fetchPools = useCallback(async () => {
+    try {
+      const res = await fetch('/api/storage/pools', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      if (Array.isArray(data)) setPools(data);
+    } catch {}
+  }, [token]);
+
+  useEffect(() => { fetchShares(); fetchUsers(); fetchApps(); fetchPools(); }, [fetchShares, fetchUsers, fetchApps, fetchPools]);
 
   const handleCreate = async () => {
     setError('');
@@ -291,13 +300,13 @@ function SharedFoldersPage() {
 
     const res = await fetch('/api/shares', {
       method: 'POST', headers,
-      body: JSON.stringify({ name: form.name, description: form.description }),
+      body: JSON.stringify({ name: form.name, description: form.description, pool: form.pool || undefined }),
     });
     const data = await res.json();
     if (data.error) return setError(data.error);
 
     setShowCreate(false);
-    setForm({ name: '', description: '' });
+    setForm({ name: '', description: '', pool: '' });
     fetchShares();
   };
 
@@ -360,7 +369,7 @@ function SharedFoldersPage() {
       {shares.length > 0 && (
         <div className={styles.tableCard}>
           <table className={styles.table}>
-            <thead><tr><th>Name</th><th>Description</th><th>Users</th><th>Apps</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Pool</th><th>Description</th><th>Users</th><th>Apps</th><th></th></tr></thead>
             <tbody>
               {shares.map((s, i) => {
                 const userCount = Object.values(s.permissions || {}).filter(p => p !== 'none').length;
@@ -368,6 +377,7 @@ function SharedFoldersPage() {
                 return (
                   <tr key={i}>
                     <td className={styles.cellName}>{s.displayName || s.name}</td>
+                    <td><span className={styles.mono} style={{fontSize:'var(--text-xs)'}}>{s.pool || s.volume || '—'}</span></td>
                     <td>{s.description || '—'}</td>
                     <td>{userCount} user{userCount !== 1 ? 's' : ''}</td>
                     <td>{appCount} app{appCount !== 1 ? 's' : ''}</td>
@@ -401,6 +411,21 @@ function SharedFoldersPage() {
                 <input className={styles.fieldInput} value={form.description}
                   onChange={e => setForm({...form, description: e.target.value})}
                   placeholder="Optional" />
+
+                {pools.length > 0 && (
+                  <>
+                    <label className={styles.fieldLabel}>Storage Pool</label>
+                    <select className={styles.fieldInput} value={form.pool}
+                      onChange={e => setForm({...form, pool: e.target.value})}>
+                      {pools.map(p => (
+                        <option key={p.name} value={p.name}>{p.name} ({p.raidLevel.toUpperCase()} — {p.availableFormatted || p.totalFormatted})</option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                {pools.length === 0 && (
+                  <div className={styles.modalError}>No storage pool available. Create one in Storage Manager first.</div>
+                )}
 
                 {error && <div className={styles.modalError}>{error}</div>}
 
