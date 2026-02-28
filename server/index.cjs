@@ -5255,16 +5255,16 @@ server.listen(PORT, '0.0.0.0', () => {
             const backupConfig = path.join(mountPoint, 'system-backup', 'config');
             if (fs.existsSync(backupConfig)) {
               console.log(`    Storage: Config backup found, restoring...`);
-              const configDir = path.join(process.env.HOME || '/root', '.nimbusos', 'config');
               try {
-                // Copy backed up configs (except storage.json which we just created)
                 const backupFiles = fs.readdirSync(backupConfig);
                 for (const file of backupFiles) {
                   if (file === 'storage.json') continue; // Don't overwrite what we just created
                   const src = path.join(backupConfig, file);
-                  const dst = path.join(configDir, file);
-                  fs.copyFileSync(src, dst);
-                  console.log(`    Storage: Restored ${file}`);
+                  const dst = path.join(CONFIG_DIR, file);
+                  if (!fs.existsSync(dst)) { // Only restore if file doesn't already exist
+                    fs.copyFileSync(src, dst);
+                    console.log(`    Storage: Restored ${file}`);
+                  }
                 }
               } catch (restoreErr) {
                 console.log(`    Storage: Config restore failed: ${restoreErr.message}`);
