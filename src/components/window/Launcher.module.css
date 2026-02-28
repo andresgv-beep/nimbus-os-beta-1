@@ -95,7 +95,7 @@
   width: 56px;
   height: 56px;
   border-radius: 14px;
-  object-fit: cover;
+  object-fit: contain;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
