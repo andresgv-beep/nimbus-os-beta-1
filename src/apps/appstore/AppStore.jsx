@@ -39,13 +39,27 @@ function DockerInstallWizard({ onClose, onInstalled, token, users }) {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
+  const [pools, setPools] = useState([]);
   
   // Config
-  const [pathType, setPathType] = useState('default'); // 'default' | 'custom'
-  const [customPath, setCustomPath] = useState('');
+  const [selectedPool, setSelectedPool] = useState('');
   const [permissions, setPermissions] = useState([]); // usernames with access
   
-  const dockerPath = pathType === 'default' ? 'docker' : customPath;
+  // Fetch pools
+  useEffect(() => {
+    fetch('/api/storage/pools', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          setPools(data);
+          setSelectedPool(data.find(p => p.isPrimary)?.name || data[0].name);
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+  
+  const selectedPoolData = pools.find(p => p.name === selectedPool);
+  const dockerPath = selectedPoolData ? selectedPoolData.mountPoint + '/docker' : '';
   
   const handleInstall = async () => {
     setInstalling(true);
@@ -129,49 +143,35 @@ function DockerInstallWizard({ onClose, onInstalled, token, users }) {
                 <div className={styles.wizardSection}>
                   <h4>Ubicación de Docker</h4>
                   <p className={styles.wizardDesc}>
-                    Todos los contenedores y sus datos se guardarán en esta ubicación.
+                    Selecciona el pool donde se guardarán los contenedores y sus datos.
                   </p>
                   
-                  <div className={styles.pathOptions}>
-                    <label className={`${styles.pathOption} ${pathType === 'default' ? styles.pathOptionActive : ''}`}>
-                      <input 
-                        type="radio" 
-                        checked={pathType === 'default'} 
-                        onChange={() => setPathType('default')}
-                      />
-                      <div>
-                        <strong>~/.nimbusos/volumes/docker</strong>
-                        <span>Recomendado (sin permisos root)</span>
-                      </div>
-                    </label>
-                    
-                    <label className={`${styles.pathOption} ${pathType === 'custom' ? styles.pathOptionActive : ''}`}>
-                      <input 
-                        type="radio" 
-                        checked={pathType === 'custom'} 
-                        onChange={() => setPathType('custom')}
-                      />
-                      <div>
-                        <strong>Ruta personalizada</strong>
-                        <span>Ej: /volume1/docker (requiere permisos)</span>
-                      </div>
-                    </label>
-                    
-                    {pathType === 'custom' && (
-                      <input
-                        type="text"
-                        className={styles.customPathInput}
-                        placeholder="/volume1/docker"
-                        value={customPath}
-                        onChange={e => setCustomPath(e.target.value)}
-                      />
-                    )}
-                  </div>
+                  {pools.length > 0 ? (
+                    <div className={styles.pathOptions}>
+                      {pools.map(p => (
+                        <label key={p.name} className={`${styles.pathOption} ${selectedPool === p.name ? styles.pathOptionActive : ''}`}>
+                          <input 
+                            type="radio" 
+                            checked={selectedPool === p.name} 
+                            onChange={() => setSelectedPool(p.name)}
+                          />
+                          <div>
+                            <strong>{p.name}</strong>
+                            <span>{p.raidLevel.toUpperCase()} · {p.totalFormatted} · {p.mountPoint}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{color:'#fbbf24',padding:'12px',border:'1px solid rgba(251,191,36,0.3)',borderRadius:8,fontSize:'0.85rem'}}>
+                      ⚠ No hay pools de almacenamiento. Crea uno en Storage Manager primero.
+                    </div>
+                  )}
                   
                   <div className={styles.pathPreview}>
                     <strong>Estructura:</strong>
                     <code>
-                      {pathType === 'default' ? '~/.nimbusos/volumes/docker' : customPath}/<br/>
+                      {dockerPath}/<br/>
                       ├── containers/<br/>
                       ├── stacks/<br/>
                       └── volumes/
