@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { GlobeIcon, CircleIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -81,7 +83,7 @@ export default function DnsPanel() {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon}>🌐</div>
+          <div className={styles.svcIcon}><ServiceIcon id="dns" size={22} /></div>
           <div>
             <h3 className={styles.title}>DNS Configuration</h3>
             <p className={styles.desc}>Domain name resolution settings for this server</p>
@@ -119,7 +121,7 @@ export default function DnsPanel() {
           <>
             {servers.length === 0 ? (
               <div className={styles.emptyState}>
-                <div className={styles.emptyIcon}>🌐</div>
+                <div className={styles.emptyIcon}><GlobeIcon size={32} /></div>
                 <div className={styles.emptyTitle}>No DNS servers configured</div>
               </div>
             ) : (
@@ -127,7 +129,7 @@ export default function DnsPanel() {
                 {servers.map((s, i) => (
                   <div key={i} className={styles.itemRow}>
                     <div className={styles.itemMain}>
-                      <div className={styles.itemIcon}>{i === 0 ? '🔵' : '⚪'}</div>
+                      <div className={styles.itemIcon}><CircleIcon size={18} style={{ color: i === 0 ? 'var(--accent)' : 'var(--text-muted)' }} /></div>
                       <div className={styles.itemInfo}>
                         <div className={styles.itemName}>{s}</div>
                         <div className={styles.itemSub}>{i === 0 ? 'Primary' : 'Secondary'}</div>
@@ -220,7 +222,7 @@ export default function DnsPanel() {
 
       {/* Info */}
       <div className={styles.infoBar}>
-        💡 DNS changes take effect immediately. If using DHCP, DNS may be overridden on next lease renewal.
+        DNS changes take effect immediately. If using DHCP, DNS may be overridden on next lease renewal.
         For persistent changes, consider setting a static DNS in your network interface configuration.
       </div>
     </div>

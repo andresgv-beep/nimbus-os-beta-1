@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { FolderOutlineIcon, PackageIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -48,7 +50,7 @@ export default function NfsPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(156,39,176,0.1)' }}>🗂</div>
+          <div className={styles.svcIcon}><ServiceIcon id="nfs" size={22} /></div>
           <div>
             <h3 className={styles.title}>NFS</h3>
             <p className={styles.desc}>Network File System for Linux/Unix clients</p>
@@ -63,7 +65,7 @@ export default function NfsPanel() {
 
       {!isInstalled && (
         <div className={styles.notInstalled}>
-          <div className={styles.notInstalledIcon}>📦</div>
+          <div className={styles.notInstalledIcon}><PackageIcon size={40} /></div>
           <div className={styles.notInstalledTitle}>NFS server not installed</div>
           <p className={styles.notInstalledDesc}>
             Install nfs-kernel-server to share directories with Linux/Unix clients.
@@ -110,7 +112,7 @@ export default function NfsPanel() {
                 {exports.map((exp, i) => (
                   <div key={i} className={styles.itemRow}>
                     <div className={styles.itemMain}>
-                      <div className={styles.itemIcon}>📁</div>
+                      <div className={styles.itemIcon}><FolderOutlineIcon size={20} /></div>
                       <div className={styles.itemInfo}>
                         <div className={styles.itemName}>{exp.path}</div>
                         <div className={styles.itemSub}>{exp.clients}</div>
@@ -147,7 +149,7 @@ export default function NfsPanel() {
           )}
 
           <div className={styles.infoBar}>
-            💡 To add exports, edit <span className={styles.mono}>/etc/exports</span> and apply with{' '}
+            To add exports, edit <span className={styles.mono}>/etc/exports</span> and apply with{' '}
             <span className={styles.mono}>sudo exportfs -ra</span>. NFS clients connect using{' '}
             <span className={styles.mono}>mount -t nfs server:/path /mnt</span>
           </div>

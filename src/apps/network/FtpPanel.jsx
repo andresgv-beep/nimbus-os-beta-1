@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { PackageIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -49,7 +51,7 @@ export default function FtpPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(255,167,38,0.1)' }}>📤</div>
+          <div className={styles.svcIcon}><ServiceIcon id="ftp" size={22} /></div>
           <div>
             <h3 className={styles.title}>FTP / SFTP</h3>
             <p className={styles.desc}>Transfer files via FTP (insecure) or SFTP (secure, recommended)</p>
@@ -64,7 +66,7 @@ export default function FtpPanel() {
 
       {!isInstalled && !sftpAvailable && (
         <div className={styles.notInstalled}>
-          <div className={styles.notInstalledIcon}>📦</div>
+          <div className={styles.notInstalledIcon}><PackageIcon size={40} /></div>
           <div className={styles.notInstalledTitle}>FTP server not installed</div>
           <p className={styles.notInstalledDesc}>
             Install vsftpd for FTP access. SFTP is available automatically if SSH is running.
@@ -148,7 +150,7 @@ export default function FtpPanel() {
           </div>
 
           <div className={styles.infoBar}>
-            💡 SFTP is the recommended file transfer protocol — it's encrypted and uses your SSH credentials.
+            SFTP is the recommended file transfer protocol — it's encrypted and uses your SSH credentials.
             FTP transmits data unencrypted and should only be used on trusted networks.
           </div>
         </>

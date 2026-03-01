@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { LockIcon, UnlockIcon, PackageIcon, LinkIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -85,7 +87,7 @@ export default function ProxyPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(33,150,243,0.1)' }}>🔀</div>
+          <div className={styles.svcIcon}><ServiceIcon id="proxy" size={22} /></div>
           <div>
             <h3 className={styles.title}>Reverse Proxy</h3>
             <p className={styles.desc}>Route external traffic to internal services via domain-based rules</p>
@@ -95,7 +97,7 @@ export default function ProxyPanel() {
 
       {!isInstalled && (
         <div className={styles.notInstalled}>
-          <div className={styles.notInstalledIcon}>📦</div>
+          <div className={styles.notInstalledIcon}><PackageIcon size={40} /></div>
           <div className={styles.notInstalledTitle}>Nginx not installed</div>
           <p className={styles.notInstalledDesc}>Install Nginx to use reverse proxy functionality.</p>
           <code className={styles.installCmd}>sudo apt install -y nginx</code>
@@ -170,7 +172,7 @@ export default function ProxyPanel() {
 
             {rules.length === 0 ? (
               <div className={styles.emptyState}>
-                <div className={styles.emptyIcon}>🔀</div>
+                <div className={styles.emptyIcon}><LinkIcon size={32} /></div>
                 <div className={styles.emptyTitle}>No proxy rules</div>
                 <p className={styles.emptyDesc}>Add a rule to route external traffic to your services. Point a domain to this server's IP first.</p>
               </div>
@@ -179,7 +181,7 @@ export default function ProxyPanel() {
                 {rules.map((rule, i) => (
                   <div key={i} className={styles.itemRow} style={{ opacity: rule.enabled ? 1 : 0.5 }}>
                     <div className={styles.itemMain}>
-                      <div className={styles.itemIcon}>{rule.ssl && rule.certPath ? '🔒' : '🔓'}</div>
+                      <div className={styles.itemIcon}>{rule.ssl && rule.certPath ? <LockIcon size={20} style={{color:'var(--accent-green)'}} /> : <UnlockIcon size={20} />}</div>
                       <div className={styles.itemInfo}>
                         <div className={styles.itemName}>{rule.domain}</div>
                         <div className={styles.itemSub}>→ {rule.target}</div>
@@ -243,7 +245,7 @@ export default function ProxyPanel() {
           )}
 
           <div className={styles.infoBar}>
-            💡 Point your domain's DNS (A record) to this server's public IP. 
+            Point your domain's DNS (A record) to this server's public IP. 
             For DDNS domains, configure DDNS first in the DDNS section. 
             SSL certificates from Let's Encrypt require port 80 to be accessible from the internet.
           </div>

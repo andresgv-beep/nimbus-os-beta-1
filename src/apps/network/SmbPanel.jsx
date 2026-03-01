@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ServiceIcon } from '@icons/services';
+import { ServiceIcon } from '@icons/services/index.jsx';
 import { FolderOutlineIcon, MonitorIcon, UserIcon, SettingsIcon, FileCodeIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './SmbPanel.module.css';

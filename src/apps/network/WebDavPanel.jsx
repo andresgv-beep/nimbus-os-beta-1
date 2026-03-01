@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { FolderOutlineIcon, SettingsIcon, PackageIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -118,7 +120,7 @@ export default function WebDavPanel() {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(33,150,243,0.1)' }}>📡</div>
+          <div className={styles.svcIcon}><ServiceIcon id="webdav" size={22} /></div>
           <div>
             <h3 className={styles.title}>WebDAV</h3>
             <p className={styles.desc}>Access files via HTTP/HTTPS with WebDAV protocol</p>
@@ -134,7 +136,7 @@ export default function WebDavPanel() {
       {/* Not installed */}
       {!isInstalled && (
         <div className={styles.notInstalled}>
-          <div className={styles.notInstalledIcon}>📦</div>
+          <div className={styles.notInstalledIcon}><PackageIcon size={40} /></div>
           <div className={styles.notInstalledTitle}>WebDAV server not installed</div>
           <p className={styles.notInstalledDesc}>
             Install Apache or Nginx with WebDAV module to serve files over HTTP.
@@ -183,8 +185,8 @@ export default function WebDavPanel() {
             active={tab}
             onChange={setTab}
             tabs={[
-              { id: 'overview', label: 'Shares', icon: '📂' },
-              { id: 'config', label: 'Configuration', icon: '⚙️' },
+              { id: 'overview', label: 'Shares', icon: <FolderOutlineIcon size={14} /> },
+              { id: 'config', label: 'Configuration', icon: <SettingsIcon size={14} /> },
             ]}
           />
 
@@ -193,7 +195,7 @@ export default function WebDavPanel() {
             <div>
               {(data?.shares || []).length === 0 ? (
                 <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>📂</div>
+                  <div className={styles.emptyIcon}><FolderOutlineIcon size={32} /></div>
                   <div className={styles.emptyTitle}>No shared folders</div>
                   <p className={styles.emptyDesc}>
                     Create shared folders in Storage Manager, then enable them for WebDAV here.
@@ -204,7 +206,7 @@ export default function WebDavPanel() {
                   {(data?.shares || []).map(share => (
                     <div key={share.name} className={styles.itemRow} style={{ opacity: share.webdavEnabled ? 1 : 0.55 }}>
                       <div className={styles.itemMain}>
-                        <div className={styles.itemIcon}>{share.webdavEnabled ? '📂' : '📁'}</div>
+                        <div className={styles.itemIcon}><FolderOutlineIcon size={20} /></div>
                         <div className={styles.itemInfo}>
                           <div className={styles.itemName}>{share.displayName || share.name}</div>
                           <div className={styles.itemSub}>{share.path}</div>

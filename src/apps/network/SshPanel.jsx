@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services/index.jsx';
+import { InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -46,7 +48,7 @@ export default function SshPanel() {
     <div className={styles.panel}>
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(76,175,80,0.1)' }}>🔐</div>
+          <div className={styles.svcIcon}><ServiceIcon id="ssh" size={22} /></div>
           <div>
             <h3 className={styles.title}>SSH</h3>
             <p className={styles.desc}>Secure shell access to the server via terminal</p>
@@ -137,7 +139,7 @@ export default function SshPanel() {
       )}
 
       <div className={styles.infoBar}>
-        💡 To edit SSH configuration, modify <span className={styles.mono}>/etc/ssh/sshd_config</span> and restart the service.
+        To edit SSH configuration, modify <span className={styles.mono}>/etc/ssh/sshd_config</span> and restart the service.
       </div>
     </div>
   );

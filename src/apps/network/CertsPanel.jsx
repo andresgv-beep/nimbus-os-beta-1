@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ServiceIcon } from '@icons/services';
+import { ServiceIcon } from '@icons/services/index.jsx';
 import { LockIcon, PlusIcon, PackageIcon, CheckCircleIcon, AlertTriangleIcon, XCircleIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';

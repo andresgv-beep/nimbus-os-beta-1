@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@context';
 import { WifiIcon, GlobeIcon, ShieldIcon } from '@icons';
 import Icon from '@icons';
+import { ServiceIcon } from '@icons/services/index.jsx';
 import SmbPanel from './SmbPanel';
 import DnsPanel from './DnsPanel';
 import CertsPanel from './CertsPanel';
@@ -14,19 +15,19 @@ import styles from './Network.module.css';
 
 /* ─── Sidebar config ─── */
 const SIDEBAR = [
-  { id: 'ifaces', label: 'Interfaces', icon: WifiIcon, section: 'Network' },
-  { id: 'dns', label: 'DNS', icon: GlobeIcon },
-  { id: 'ports', label: 'Port Exposure', icon: GlobeIcon, section: 'External Access' },
-  { id: 'ddns', label: 'DDNS', icon: GlobeIcon },
-  { id: 'proxy', label: 'Reverse Proxy', icon: GlobeIcon },
-  { id: 'certs', label: 'Certificates', icon: ShieldIcon },
-  { id: 'smb', label: 'SMB / CIFS', icon: GlobeIcon, section: 'Services' },
-  { id: 'ftp', label: 'FTP / SFTP', icon: GlobeIcon },
-  { id: 'ssh', label: 'SSH', icon: ShieldIcon },
-  { id: 'nfs', label: 'NFS', icon: GlobeIcon },
-  { id: 'webdav', label: 'WebDAV', icon: GlobeIcon },
-  { id: 'firewall', label: 'Firewall', icon: ShieldIcon, section: 'Security' },
-  { id: 'fail2ban', label: 'Fail2ban', icon: ShieldIcon },
+  { id: 'ifaces', label: 'Interfaces', section: 'Network' },
+  { id: 'dns', label: 'DNS' },
+  { id: 'ports', label: 'Port Exposure', section: 'External Access' },
+  { id: 'ddns', label: 'DDNS' },
+  { id: 'proxy', label: 'Reverse Proxy' },
+  { id: 'certs', label: 'Certificates' },
+  { id: 'smb', label: 'SMB / CIFS', section: 'Services' },
+  { id: 'ftp', label: 'FTP / SFTP' },
+  { id: 'ssh', label: 'SSH' },
+  { id: 'nfs', label: 'NFS' },
+  { id: 'webdav', label: 'WebDAV' },
+  { id: 'firewall', label: 'Firewall', section: 'Security' },
+  { id: 'fail2ban', label: 'Fail2ban' },
 ];
 
 /* ─── Reusable Toggle ─── */
@@ -368,7 +369,7 @@ function DDNSPage() {
       </div>
       {testResult && (
         <div style={{ marginTop: 12, padding: '10px 14px', background: testResult.ok ? 'rgba(76,175,80,0.08)' : 'rgba(239,83,80,0.08)', border: `1px solid ${testResult.ok ? 'rgba(76,175,80,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 'var(--radius)', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
-          {testResult.ok ? `✅ ${testResult.response}` : `❌ ${testResult.error}`}
+          {testResult.ok ? `OK: ${testResult.response}` : `Error: ${testResult.error}`}
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
@@ -620,10 +621,10 @@ function FirewallPage() {
       {/* Tabs */}
       <div className={styles.fwTabs}>
         {[
-          { id: 'services', label: '🔍 Services' },
-          { id: 'rules', label: '📋 Rules' },
-          { id: 'upnp', label: '🌐 Router (UPnP)' },
-          { id: 'manual', label: '✏️ Add Rule' },
+          { id: 'services', label: 'Services' },
+          { id: 'rules', label: 'Rules' },
+          { id: 'upnp', label: 'Router (UPnP)' },
+          { id: 'manual', label: 'Add Rule' },
         ].map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); if (t.id === 'upnp' && !upnp) fetchUpnp(); }}
             className={`${styles.fwTab} ${tab === t.id ? styles.fwTabActive : ''}`}
@@ -636,7 +637,7 @@ function FirewallPage() {
         <div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <button className={styles.actionBtn} onClick={doScan} disabled={scanning}>
-              {scanning ? '⟳ Scanning...' : '🔍 Rescan'}
+              {scanning ? 'Scanning...' : 'Rescan'}
             </button>
           </div>
 
@@ -645,7 +646,7 @@ function FirewallPage() {
               <div key={si} className={styles.serviceRow}>
                 <div className={styles.serviceRowHeader}>
                   <div className={`${styles.svcIcon} ${svc.isDocker ? styles.svcIconDocker : ''}`}>
-                    {svc.isDocker ? '🐳' : '⚙️'}
+                    {svc.isDocker ? 'D' : '●'}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className={styles.svcName}>{svc.name}</div>
@@ -665,7 +666,7 @@ function FirewallPage() {
                           <button className={styles.actionBtnDanger} onClick={() => handleClosePort(p.port, p.protocol)}
                             disabled={inProgress || isCritical}
                             title={isCritical ? 'Critical port — protected' : 'Block this port'}>
-                            {inProgress ? '...' : isCritical ? '🔒' : 'Close'}
+                            {inProgress ? '...' : isCritical ? 'Protected' : 'Close'}
                           </button>
                         ) : (
                           <>
@@ -675,7 +676,7 @@ function FirewallPage() {
                             </button>
                             <button className={styles.actionBtnUpnp} onClick={() => handleOpenBoth(p.port, p.protocol)}
                               disabled={inProgress} title="Open firewall + forward on router">
-                              {inProgress ? '...' : '🌐+Open'}
+                              {inProgress ? '...' : 'Open'}
                             </button>
                           </>
                         )}
@@ -700,7 +701,7 @@ function FirewallPage() {
                           {p.firewallAllowed ? (
                             <button className={styles.actionBtnDanger} onClick={() => handleClosePort(p.port, p.protocol)}
                               disabled={inProgress || isCritical}>
-                              {inProgress ? '...' : isCritical ? '🔒' : 'Close'}
+                              {inProgress ? '...' : isCritical ? 'Protected' : 'Close'}
                             </button>
                           ) : (
                             <>
@@ -1038,7 +1039,7 @@ export default function Network() {
               className={`${styles.sidebarItem} ${active === item.id ? styles.active : ''}`}
               onClick={() => setActive(item.id)}
             >
-              <span className={styles.sidebarIcon}><item.icon size={16} /></span>
+              <span className={styles.sidebarIcon}><ServiceIcon id={item.id} size={16} /></span>
               {item.label}
               {['smb', 'ftp', 'ssh', 'nfs', 'webdav'].includes(item.id) && (
                 <span className={`${styles.sidebarDot} ${services[item.id] ? styles.dotOn : styles.dotOff}`} />
