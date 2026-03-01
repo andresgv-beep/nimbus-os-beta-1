@@ -147,7 +147,7 @@ function NetworkWidget({ data, live }) {
   return (
     <div className={styles.widget}>
       <div className={styles.widgetTitle}><GlobeIcon size={16} /> Network</div>
-      <Metric label={iface.name} value={iface.speed} style={{ color: 'var(--accent-green)' }} />
+      <Metric label={iface.name} value={iface.type === 'wifi' && iface.ssid ? `WiFi · ${iface.ssid}` : iface.speed} style={{ color: 'var(--accent-green)' }} />
       <Metric label="↓ Download" value={formatRate(iface.rxRate)} />
       <Metric label="↑ Upload" value={formatRate(iface.txRate)} />
       <Metric label="IP" value={iface.ip} />
