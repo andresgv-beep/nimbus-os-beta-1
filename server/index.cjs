@@ -2215,7 +2215,10 @@ function saveSmbConfig(config) {
 }
 
 function getSmbStatus() {
-  const samba = detectNativeApp('samba');
+  // Separate installed check from running check
+  // detectNativeApp uses 'systemctl is-active smbd' which throws on exit code 3 (inactive)
+  const installed = !!run('which smbd 2>/dev/null');
+  const running = run('systemctl is-active smbd 2>/dev/null') === 'active';
   
   // Try to get connected clients
   let clients = [];
@@ -2258,8 +2261,8 @@ function getSmbStatus() {
   }
 
   return {
-    installed: samba.installed,
-    running: samba.running,
+    installed,
+    running,
     clients,
     clientCount: clients.length,
     lockedFiles,
