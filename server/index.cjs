@@ -383,6 +383,91 @@ function registerNativeApp(appData) {
 // ═══════════════════════════════════
 // Auth helpers
 // ═══════════════════════════════════
+// ═══════════════════════════════════
+// Rate limiting for auth endpoints
+// ═══════════════════════════════════
+const LOGIN_ATTEMPTS = {}; // { ip: { count, lastAttempt, lockedUntil } }
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes
+
+function checkRateLimit(ip) {
+  const record = LOGIN_ATTEMPTS[ip];
+  if (!record) return { allowed: true };
+  if (record.lockedUntil && Date.now() < record.lockedUntil) {
+    const remaining = Math.ceil((record.lockedUntil - Date.now()) / 60000);
+    return { allowed: false, message: `Too many attempts. Try again in ${remaining} minutes.` };
+  }
+  if (record.lockedUntil && Date.now() >= record.lockedUntil) {
+    delete LOGIN_ATTEMPTS[ip];
+    return { allowed: true };
+  }
+  return { allowed: true };
+}
+
+function recordFailedAttempt(ip) {
+  if (!LOGIN_ATTEMPTS[ip]) LOGIN_ATTEMPTS[ip] = { count: 0, lastAttempt: 0 };
+  const record = LOGIN_ATTEMPTS[ip];
+  // Reset if last attempt was more than lockout duration ago
+  if (Date.now() - record.lastAttempt > LOCKOUT_DURATION) record.count = 0;
+  record.count++;
+  record.lastAttempt = Date.now();
+  if (record.count >= MAX_LOGIN_ATTEMPTS) {
+    record.lockedUntil = Date.now() + LOCKOUT_DURATION;
+  }
+}
+
+function clearFailedAttempts(ip) {
+  delete LOGIN_ATTEMPTS[ip];
+}
+
+// Clean up old entries every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const ip of Object.keys(LOGIN_ATTEMPTS)) {
+    const r = LOGIN_ATTEMPTS[ip];
+    if (now - r.lastAttempt > LOCKOUT_DURATION * 2) delete LOGIN_ATTEMPTS[ip];
+  }
+}, 3600000);
+
+// ═══════════════════════════════════
+// TOTP secret encryption (encrypt at rest with server key)
+// ═══════════════════════════════════
+const SERVER_KEY_FILE = path.join(CONFIG_DIR, '.server_key');
+function getServerKey() {
+  if (fs.existsSync(SERVER_KEY_FILE)) return fs.readFileSync(SERVER_KEY_FILE, 'utf-8').trim();
+  const key = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(SERVER_KEY_FILE, key, { mode: 0o600 });
+  return key;
+}
+
+function encryptSecret(plaintext) {
+  const key = Buffer.from(getServerKey(), 'hex');
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptSecret(ciphertext) {
+  if (!ciphertext || !ciphertext.includes(':')) return ciphertext; // backwards compat: unencrypted
+  const key = Buffer.from(getServerKey(), 'hex');
+  const [ivHex, encrypted] = ciphertext.split(':');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
+
+// Backup codes for 2FA recovery
+function generateBackupCodes(count = 8) {
+  const codes = [];
+  for (let i = 0; i < count; i++) {
+    codes.push(crypto.randomBytes(4).toString('hex').toUpperCase());
+  }
+  return codes;
+}
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -454,8 +539,40 @@ function verifyTotp(secret, token) {
 function getTotpQrUrl(username, secret) {
   const issuer = 'NimbusOS';
   const uri = `otpauth://totp/${issuer}:${username}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
-  // Return a URL to Google Charts QR API (works offline too if user has the URI)
-  return { uri, qrUrl: `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(uri)}` };
+  return { uri };
+}
+
+function generateQrSvg(text) {
+  // Try qrencode CLI first (apt install qrencode)
+  try {
+    const svg = execSync(`echo -n "${text.replace(/"/g, '\\"')}" | qrencode -t SVG -o - -m 1`, { timeout: 5000 }).toString();
+    return svg;
+  } catch {}
+  
+  // Try python3 qrcode module
+  try {
+    const svg = execSync(`python3 -c "
+import qrcode, qrcode.image.svg, sys
+img = qrcode.make(sys.argv[1], image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=1)
+import io; buf = io.BytesIO(); img.save(buf); sys.stdout.buffer.write(buf.getvalue())
+" "${text.replace(/"/g, '\\"')}"`, { timeout: 5000 }).toString();
+    return svg;
+  } catch {}
+  
+  // Install qrencode and retry
+  try {
+    execSync('apt-get install -y qrencode 2>/dev/null', { timeout: 30000, stdio: 'pipe' });
+    const svg = execSync(`echo -n "${text.replace(/"/g, '\\"')}" | qrencode -t SVG -o - -m 1`, { timeout: 5000 }).toString();
+    return svg;
+  } catch {}
+  
+  throw new Error('QR generation not available. Install qrencode: sudo apt install qrencode');
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${hash}`;
 }
 
 function verifyPassword(password, stored) {
@@ -598,9 +715,15 @@ function handleAuth(url, method, body, req) {
     const { username, password, totpCode } = body;
     if (!username || !password) return { error: 'Username and password required' };
 
+    // Rate limiting
+    const clientIp = req.socket?.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(clientIp);
+    if (!rateCheck.allowed) return { error: rateCheck.message };
+
     const users = getUsers();
     const user = users.find(u => u.username === username.toLowerCase().trim());
     if (!user || !verifyPassword(password, user.password)) {
+      recordFailedAttempt(clientIp);
       return { error: 'Invalid credentials' };
     }
 
@@ -609,11 +732,26 @@ function handleAuth(url, method, body, req) {
       if (!totpCode) {
         return { requires2FA: true, message: 'Two-factor authentication code required' };
       }
-      if (!verifyTotp(user.totpSecret, totpCode)) {
-        return { error: 'Invalid 2FA code' };
+      const secret = decryptSecret(user.totpSecret);
+      if (!verifyTotp(secret, totpCode)) {
+        // Check backup codes
+        let backupValid = false;
+        if (user.backupCodes && Array.isArray(user.backupCodes)) {
+          const idx = user.backupCodes.indexOf(totpCode.toUpperCase());
+          if (idx !== -1) {
+            user.backupCodes.splice(idx, 1); // One-time use
+            saveUsers(users);
+            backupValid = true;
+          }
+        }
+        if (!backupValid) {
+          recordFailedAttempt(clientIp);
+          return { error: 'Invalid 2FA code' };
+        }
       }
     }
 
+    clearFailedAttempts(clientIp);
     const token = generateToken();
     SESSIONS[token] = { username: user.username, role: user.role, created: Date.now() };
     saveSessions();
@@ -661,14 +799,14 @@ function handleAuth(url, method, body, req) {
     const user = users.find(u => u.username === session.username);
     if (!user) return { error: 'User not found' };
     
-    // Generate new secret (not yet enabled)
+    // Generate new secret (store encrypted, not yet enabled)
     const secret = generateTotpSecret();
-    user.totpSecret = secret;
+    user.totpSecret = encryptSecret(secret);
     user.totpEnabled = false;
     saveUsers(users);
     
-    const { uri, qrUrl } = getTotpQrUrl(user.username, secret);
-    return { ok: true, secret, uri, qrUrl };
+    const { uri } = getTotpQrUrl(user.username, secret);
+    return { ok: true, secret, uri };
   }
 
   // POST /api/auth/2fa/verify — verify TOTP code and enable 2FA
@@ -683,14 +821,18 @@ function handleAuth(url, method, body, req) {
     const user = users.find(u => u.username === session.username);
     if (!user || !user.totpSecret) return { error: 'No 2FA setup in progress' };
     
-    if (!verifyTotp(user.totpSecret, code)) {
+    const secret = decryptSecret(user.totpSecret);
+    if (!verifyTotp(secret, code)) {
       return { error: 'Invalid code. Make sure your authenticator app is synced.' };
     }
     
+    // Generate backup codes
+    const backupCodes = generateBackupCodes();
     user.totpEnabled = true;
+    user.backupCodes = backupCodes;
     saveUsers(users);
     
-    return { ok: true, message: '2FA enabled successfully' };
+    return { ok: true, message: '2FA enabled successfully', backupCodes };
   }
 
   // POST /api/auth/2fa/disable — disable 2FA
@@ -724,6 +866,22 @@ function handleAuth(url, method, body, req) {
     const users = getUsers();
     const user = users.find(u => u.username === session.username);
     return { enabled: !!(user?.totpEnabled) };
+  }
+
+  // POST /api/auth/2fa/qr — generate QR code as SVG
+  if (url === '/api/auth/2fa/qr' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const { text } = body;
+    if (!text) return { error: 'Text required' };
+    
+    try {
+      const svg = generateQrSvg(text);
+      return { svg };
+    } catch (err) {
+      return { error: 'QR generation failed', detail: err.message };
+    }
   }
 
   // POST /api/auth/logout
