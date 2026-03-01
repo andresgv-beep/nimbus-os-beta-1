@@ -242,12 +242,16 @@ function DNSPage() {
 
 /* ─── DDNS Page ─── */
 function DDNSPage() {
+  const { token } = useAuth();
   const [config, setConfig] = useState({ enabled: false, provider: '', domain: '', token: '', username: '', interval: 5 });
-  const [status, setStatus] = useState({ externalIp: '—', lastUpdate: 'Never', lastStatus: 'Not configured' });
+  const [status, setStatus] = useState({ externalIp: '—', lastLog: '' });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
   const [showToken, setShowToken] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
 
   const PROVIDERS = [
     { id: 'duckdns', name: 'DuckDNS', url: 'duckdns.org', domainSuffix: '.duckdns.org', needsUsername: false },
@@ -263,16 +267,42 @@ function DDNSPage() {
     { value: 60, label: 'Every hour' },
   ];
 
+  useEffect(() => {
+    fetch('/api/ddns/status', { headers })
+      .then(r => r.json())
+      .then(d => {
+        if (!d.error) {
+          if (d.config) setConfig(d.config);
+          setStatus({ externalIp: d.externalIp || '—', lastLog: d.lastLog || '' });
+        }
+      }).catch(() => {});
+  }, []);
+
   const selectedProvider = PROVIDERS.find(p => p.id === config.provider);
 
   const handleSave = async () => {
     setSaving(true);
-    setTimeout(() => { setSaving(false); setStatus(prev => ({ ...prev, lastStatus: config.enabled ? 'Configured' : 'Disabled' })); }, 1000);
+    try {
+      await fetch('/api/ddns/config', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(config) });
+    } catch {}
+    setSaving(false);
   };
+
   const handleTest = async () => {
     setTesting(true);
-    setTimeout(() => { setTesting(false); setStatus({ externalIp: '84.123.45.67', lastUpdate: 'Just now', lastStatus: 'OK' }); }, 2000);
+    setTestResult(null);
+    try {
+      const r = await fetch('/api/ddns/test', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(config) });
+      const d = await r.json();
+      setTestResult(d);
+      // Refresh status
+      const sr = await fetch('/api/ddns/status', { headers });
+      const sd = await sr.json();
+      if (!sd.error) setStatus({ externalIp: sd.externalIp || '—', lastLog: sd.lastLog || '' });
+    } catch (e) { setTestResult({ error: e.message }); }
+    setTesting(false);
   };
+
   const selectProvider = (providerId) => {
     setConfig(prev => ({ ...prev, provider: providerId, domain: '', token: '', username: '' }));
     setDropdownOpen(false);
@@ -288,9 +318,9 @@ function DDNSPage() {
         <Toggle on={config.enabled} onChange={() => setConfig(prev => ({ ...prev, enabled: !prev.enabled }))} />
       </div>
       <div className={styles.serviceGrid}>
-        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>External IP</div><div className={styles.serviceValue}>{status.externalIp}</div></div>
-        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>Last Update</div><div className={styles.serviceValue}>{status.lastUpdate}</div></div>
-        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>Status</div><div className={styles.serviceValue}>{status.lastStatus}</div></div>
+        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>External IP</div><div className={styles.serviceValue} style={{ fontFamily: 'var(--font-mono)' }}>{status.externalIp}</div></div>
+        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>Provider</div><div className={styles.serviceValue}>{selectedProvider?.name || 'Not set'}</div></div>
+        <div className={styles.serviceCard}><div className={styles.serviceCardTitle}>Last Update</div><div className={styles.serviceValue} style={{ fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)' }}>{status.lastLog || 'Never'}</div></div>
       </div>
       <div className={styles.configCard}>
         <div className={styles.configTitle}>Provider</div>
@@ -313,10 +343,18 @@ function DDNSPage() {
               <input className={styles.input} placeholder={`myhost${selectedProvider.domainSuffix}`} value={config.domain}
                 onChange={e => setConfig(p => ({ ...p, domain: e.target.value }))} />
             </div>
+            {selectedProvider.needsUsername && (
+              <div style={{ marginTop: 12 }}>
+                <label className={styles.formLabel}>Username</label>
+                <input className={styles.input} value={config.username}
+                  onChange={e => setConfig(p => ({ ...p, username: e.target.value }))} />
+              </div>
+            )}
             <div style={{ marginTop: 12 }}>
               <label className={styles.formLabel}>{selectedProvider.tokenLabel || 'Token / Password'}</label>
               <input className={styles.input} type={showToken ? 'text' : 'password'} value={config.token}
                 onChange={e => setConfig(p => ({ ...p, token: e.target.value }))} />
+              <span onClick={() => setShowToken(!showToken)} style={{ cursor: 'pointer', fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginLeft: 8 }}>{showToken ? 'Hide' : 'Show'}</span>
             </div>
             <div style={{ marginTop: 12 }}>
               <label className={styles.formLabel}>Update interval</label>
@@ -327,9 +365,14 @@ function DDNSPage() {
           </>
         )}
       </div>
+      {testResult && (
+        <div style={{ marginTop: 12, padding: '10px 14px', background: testResult.ok ? 'rgba(76,175,80,0.08)' : 'rgba(239,83,80,0.08)', border: `1px solid ${testResult.ok ? 'rgba(76,175,80,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 'var(--radius)', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
+          {testResult.ok ? `✅ ${testResult.response}` : `❌ ${testResult.error}`}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button className={styles.actionBtn} onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
-        <button className={styles.actionBtnSecondary} onClick={handleTest} disabled={testing}>{testing ? 'Testing...' : 'Test Now'}</button>
+        <button className={styles.actionBtnSecondary} onClick={handleTest} disabled={testing || !config.provider || !config.domain || !config.token}>{testing ? 'Testing...' : 'Test Now'}</button>
       </div>
     </div>
   );
