@@ -10,6 +10,7 @@ export default defineConfig({
       '@apps': resolve(__dirname, './src/apps'),
       '@components': resolve(__dirname, './src/components'),
       '@core': resolve(__dirname, './src/core'),
+      '@icons/services': resolve(__dirname, './src/icons/services'),
       '@icons': resolve(__dirname, './src/icons'),
       '@hooks': resolve(__dirname, './src/hooks'),
       '@context': resolve(__dirname, './src/context'),
