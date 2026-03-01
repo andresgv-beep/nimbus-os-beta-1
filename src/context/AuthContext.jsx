@@ -61,13 +61,14 @@ export function AuthProvider({ children }) {
     return data;
   }, []);
 
-  const login = useCallback(async (username, password) => {
+  const login = useCallback(async (username, password, totpCode) => {
     const res = await fetch(`${API}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, totpCode }),
     });
     const data = await res.json();
+    if (data.requires2FA) return data;
     if (data.error) throw new Error(data.error);
 
     saveToken(data.token);
