@@ -5141,10 +5141,9 @@ function getNetwork() {
     });
   }
 
-  // Only physical ethernet interfaces (exclude virtual, docker, bridges, etc.)
-  const isPhysicalEthernet = (dev) => {
-    // Include: eth*, enp*, eno*, ens* (physical ethernet)
-    // Exclude: lo, docker*, br-*, veth*, virbr*, tun*, tap*, wl* (wifi)
+  // Only physical network interfaces (exclude virtual, docker, bridges, etc.)
+  const isPhysicalInterface = (dev) => {
+    // Exclude: lo, docker*, br-*, veth*, virbr*, tun*, tap*
     if (dev === 'lo') return false;
     if (dev.startsWith('docker')) return false;
     if (dev.startsWith('br-')) return false;
@@ -5152,20 +5151,19 @@ function getNetwork() {
     if (dev.startsWith('virbr')) return false;
     if (dev.startsWith('tun')) return false;
     if (dev.startsWith('tap')) return false;
-    if (dev.startsWith('wl')) return false; // wifi
     // Check if it's a physical device
     const physicalPath = `/sys/class/net/${dev}/device`;
     try {
       fs.statSync(physicalPath);
       return true; // Has a physical device backing
     } catch {
-      // No physical device, but allow common ethernet naming patterns
-      return dev.startsWith('eth') || dev.startsWith('enp') || dev.startsWith('eno') || dev.startsWith('ens');
+      // No physical device, but allow common naming patterns
+      return dev.startsWith('eth') || dev.startsWith('enp') || dev.startsWith('eno') || dev.startsWith('ens') || dev.startsWith('wl');
     }
   };
 
   try {
-    const devs = fs.readdirSync(netDir).filter(d => isPhysicalEthernet(d));
+    const devs = fs.readdirSync(netDir).filter(d => isPhysicalInterface(d));
     for (const dev of devs) {
       const operstate = readFile(`${netDir}/${dev}/operstate`) || 'unknown';
       
@@ -5176,6 +5174,18 @@ function getNetwork() {
       const rxBytes = parseInt(readFile(`${netDir}/${dev}/statistics/rx_bytes`) || '0');
       const txBytes = parseInt(readFile(`${netDir}/${dev}/statistics/tx_bytes`) || '0');
       const mac = readFile(`${netDir}/${dev}/address`) || '';
+      const isWifi = dev.startsWith('wl');
+      
+      // Get WiFi info if wireless
+      let ssid = null, signal = null;
+      if (isWifi) {
+        ssid = run(`iwgetid -r ${dev} 2>/dev/null`) || run(`nmcli -t -f active,ssid dev wifi 2>/dev/null | grep '^yes' | cut -d: -f2`) || null;
+        const sigRaw = run(`iwconfig ${dev} 2>/dev/null | grep -i signal`);
+        if (sigRaw) {
+          const sigMatch = sigRaw.match(/Signal level[=:]?\s*(-?\d+)/i);
+          if (sigMatch) signal = parseInt(sigMatch[1]);
+        }
+      }
 
       const prev = prevNet[dev];
       let rxRate = 0, txRate = 0;
@@ -5190,10 +5200,13 @@ function getNetwork() {
 
       interfaces.push({
         name: dev,
+        type: isWifi ? 'wifi' : 'ethernet',
         status: operstate,
-        speed: speed && parseInt(speed) > 0 ? `${speed} Mbps` : '—',
+        speed: speed && parseInt(speed) > 0 ? `${speed} Mbps` : isWifi && ssid ? 'WiFi' : '—',
         ip: allIps[dev] || '—',
         mac,
+        ssid: ssid ? ssid.trim() : null,
+        signal,
         rxBytes, txBytes,
         rxRate, txRate,
         rxRateFormatted: formatBytes(rxRate) + '/s',
