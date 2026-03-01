@@ -7078,6 +7078,33 @@ const server = http.createServer((req, res) => {
   }
 
   // ── System Update routes ──
+  // ── System power actions ──
+  if (url === '/api/system/reboot' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      res.writeHead(200, CORS_HEADERS);
+      res.end(JSON.stringify({ ok: true, message: 'System rebooting...' }));
+      setTimeout(() => { try { execSync('sudo reboot'); } catch {} }, 1000);
+    });
+    return;
+  }
+  
+  if (url === '/api/system/shutdown' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      res.writeHead(200, CORS_HEADERS);
+      res.end(JSON.stringify({ ok: true, message: 'System shutting down...' }));
+      setTimeout(() => { try { execSync('sudo shutdown -h now'); } catch {} }, 1000);
+    });
+    return;
+  }
+
   if (url.startsWith('/api/system/update')) {
     const session = getSessionUser(req);
     if (!session || session.role !== 'admin') {
