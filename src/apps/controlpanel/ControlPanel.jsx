@@ -901,6 +901,166 @@ function UpdatesPage() {
   );
 }
 
+function LoginSettingsPage() {
+  const { token, user } = useAuth();
+  const headers = { 'Authorization': `Bearer ${token}` };
+  const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
+
+  // Password
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [pwMsg, setPwMsg] = useState(null);
+  const [pwSaving, setPwSaving] = useState(false);
+
+  // 2FA
+  const [twoFaEnabled, setTwoFaEnabled] = useState(false);
+  const [twoFaSetup, setTwoFaSetup] = useState(null); // { secret, qrUrl, uri }
+  const [twoFaCode, setTwoFaCode] = useState('');
+  const [twoFaMsg, setTwoFaMsg] = useState(null);
+  const [disablePw, setDisablePw] = useState('');
+  const [showDisable, setShowDisable] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/auth/2fa/status', { headers }).then(r => r.json()).then(d => {
+      if (d.enabled) setTwoFaEnabled(true);
+    }).catch(() => {});
+  }, []);
+
+  const handleChangePassword = async () => {
+    if (newPw !== confirmPw) { setPwMsg({ type: 'error', text: 'Passwords do not match' }); return; }
+    if (newPw.length < 4) { setPwMsg({ type: 'error', text: 'Minimum 4 characters' }); return; }
+    setPwSaving(true); setPwMsg(null);
+    const r = await fetch('/api/auth/change-password', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ currentPassword: currentPw, newPassword: newPw }) });
+    const d = await r.json();
+    setPwSaving(false);
+    if (d.error) { setPwMsg({ type: 'error', text: d.error }); return; }
+    setPwMsg({ type: 'ok', text: 'Password changed successfully' });
+    setCurrentPw(''); setNewPw(''); setConfirmPw('');
+  };
+
+  const handleSetup2FA = async () => {
+    setTwoFaMsg(null);
+    const r = await fetch('/api/auth/2fa/setup', { method: 'POST', headers: jsonHeaders });
+    const d = await r.json();
+    if (d.error) { setTwoFaMsg({ type: 'error', text: d.error }); return; }
+    setTwoFaSetup(d);
+  };
+
+  const handleVerify2FA = async () => {
+    if (!twoFaCode || twoFaCode.length !== 6) { setTwoFaMsg({ type: 'error', text: 'Enter the 6-digit code' }); return; }
+    const r = await fetch('/api/auth/2fa/verify', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: twoFaCode }) });
+    const d = await r.json();
+    if (d.error) { setTwoFaMsg({ type: 'error', text: d.error }); return; }
+    setTwoFaEnabled(true);
+    setTwoFaSetup(null);
+    setTwoFaCode('');
+    setTwoFaMsg({ type: 'ok', text: '2FA enabled successfully' });
+  };
+
+  const handleDisable2FA = async () => {
+    if (!disablePw) { setTwoFaMsg({ type: 'error', text: 'Password required' }); return; }
+    const r = await fetch('/api/auth/2fa/disable', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ password: disablePw }) });
+    const d = await r.json();
+    if (d.error) { setTwoFaMsg({ type: 'error', text: d.error }); return; }
+    setTwoFaEnabled(false);
+    setShowDisable(false);
+    setDisablePw('');
+    setTwoFaMsg({ type: 'ok', text: '2FA disabled' });
+  };
+
+  const inputStyle = { height: 34, padding: '0 12px', fontSize: 'var(--text-sm)', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', outline: 'none', width: '100%', maxWidth: 280 };
+  const btnPrimary = { height: 34, padding: '0 16px', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)', color: 'white', background: 'var(--accent)', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'var(--font-sans)' };
+  const btnSecondary = { ...btnPrimary, background: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border)' };
+  const msgStyle = (type) => ({ marginTop: 8, padding: '6px 12px', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-sm)', background: type === 'ok' ? 'rgba(76,175,80,0.08)' : 'rgba(239,83,80,0.08)', color: type === 'ok' ? 'var(--accent-green)' : 'var(--accent-red)' });
+
+  return (
+    <div>
+      <h3 className={styles.title}>Login Settings</h3>
+
+      <div className={styles.configCard}>
+        <div className={styles.configTitle}>Change Password</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '4px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', width: 130, textAlign: 'right' }}>Current password</span>
+            <input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', width: 130, textAlign: 'right' }}>New password</span>
+            <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', width: 130, textAlign: 'right' }}>Confirm password</span>
+            <input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 }}>
+            <span style={{ width: 130 }} />
+            <button style={btnPrimary} onClick={handleChangePassword} disabled={pwSaving}>{pwSaving ? 'Saving...' : 'Change Password'}</button>
+          </div>
+          {pwMsg && <div style={{ ...msgStyle(pwMsg.type), marginLeft: 142 }}>{pwMsg.text}</div>}
+        </div>
+      </div>
+
+      <div className={styles.configCard}>
+        <div className={styles.configTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          Two-Factor Authentication (2FA)
+          <span style={{ fontSize: 'var(--text-xs)', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: twoFaEnabled ? 'rgba(76,175,80,0.08)' : 'rgba(255,255,255,0.05)', color: twoFaEnabled ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+            {twoFaEnabled ? 'Enabled' : 'Disabled'}
+          </span>
+        </div>
+
+        <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', margin: '8px 0 16px', lineHeight: 1.5 }}>
+          Add an extra layer of security. When enabled, you will need to enter a code from your authenticator app (Google Authenticator, Authy, etc.) when logging in.
+        </p>
+
+        {!twoFaEnabled && !twoFaSetup && (
+          <button style={btnPrimary} onClick={handleSetup2FA}>Set Up 2FA</button>
+        )}
+
+        {twoFaSetup && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+              <div style={{ background: 'white', padding: 8, borderRadius: 'var(--radius)', flexShrink: 0 }}>
+                <img src={twoFaSetup.qrUrl} alt="QR Code" width={180} height={180} />
+              </div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                <p style={{ marginBottom: 8 }}>1. Open your authenticator app</p>
+                <p style={{ marginBottom: 8 }}>2. Scan the QR code</p>
+                <p style={{ marginBottom: 12 }}>3. Enter the 6-digit code below</p>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', padding: '8px 10px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', wordBreak: 'break-all', fontFamily: 'var(--font-mono)' }}>
+                  {twoFaSetup.secret}
+                </div>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 4 }}>Manual entry key (if QR scan fails)</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="text" placeholder="000000" maxLength={6} value={twoFaCode}
+                onChange={e => setTwoFaCode(e.target.value.replace(/\D/g, ''))}
+                style={{ ...inputStyle, width: 120, textAlign: 'center', fontSize: 'var(--text-lg)', letterSpacing: 4, fontFamily: 'var(--font-mono)' }} />
+              <button style={btnPrimary} onClick={handleVerify2FA}>Verify and Enable</button>
+              <button style={btnSecondary} onClick={() => { setTwoFaSetup(null); setTwoFaCode(''); }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {twoFaEnabled && !showDisable && (
+          <button style={{ ...btnSecondary, color: 'var(--accent-red)' }} onClick={() => setShowDisable(true)}>Disable 2FA</button>
+        )}
+
+        {showDisable && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="password" placeholder="Enter password to confirm" value={disablePw} onChange={e => setDisablePw(e.target.value)} style={inputStyle} />
+            <button style={{ ...btnPrimary, background: 'var(--accent-red, #ef5350)' }} onClick={handleDisable2FA}>Confirm Disable</button>
+            <button style={btnSecondary} onClick={() => { setShowDisable(false); setDisablePw(''); }}>Cancel</button>
+          </div>
+        )}
+
+        {twoFaMsg && <div style={msgStyle(twoFaMsg.type)}>{twoFaMsg.text}</div>}
+      </div>
+    </div>
+  );
+}
+
 function PlaceholderPage({ title }) {
   return (
     <div>
@@ -925,7 +1085,7 @@ export default function ControlPanel() {
       case 'folders': return <SharedFoldersPage />;
       case 'appperm': return <AppPermissionsPage />;
       case 'portal': return <PortalPage />;
-      case 'login': return <PlaceholderPage title="Login Settings" />;
+      case 'login': return <LoginSettingsPage />;
       case 'sessions': return <PlaceholderPage title="Active Sessions" />;
       case 'history': return <PlaceholderPage title="Login History" />;
       case 'updates': return <UpdatesPage />;
