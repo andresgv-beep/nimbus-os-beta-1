@@ -273,6 +273,19 @@ function unregisterApp(appId) {
 
 // Known native apps that NimbusOS can detect and integrate
 const KNOWN_NATIVE_APPS = {
+  'virtualization': {
+    name: 'Virtual Machines (KVM)',
+    description: 'Full virtualization with QEMU/KVM. Create and manage virtual machines.',
+    category: 'system',
+    checkCommand: 'which virsh 2>/dev/null && which qemu-system-x86_64 2>/dev/null',
+    installCommand: 'sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virt-install virtinst && sudo systemctl enable libvirtd && sudo systemctl start libvirtd && sudo mkdir -p /var/lib/nimbusos/vms /var/lib/nimbusos/isos',
+    uninstallCommand: 'sudo apt remove -y qemu-kvm libvirt-daemon-system libvirt-clients virt-install virtinst',
+    port: null,
+    icon: '/app-icons/virtualization.svg',
+    color: '#7C4DFF',
+    isNativeApp: true,
+    nimbusApp: 'vms',
+  },
   'transmission': {
     name: 'Transmission',
     checkCommand: 'systemctl is-active transmission-daemon',
@@ -3467,6 +3480,283 @@ function handleSmb(url, method, body, req) {
   return null;
 }
 
+// ═══════════════════════════════════
+// Virtual Machines (QEMU/KVM) API
+// ═══════════════════════════════════
+const VM_DIR = '/var/lib/nimbusos/vms';
+const ISO_DIR = '/var/lib/nimbusos/isos';
+
+function handleVMs(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  // GET /api/vms/status — check if KVM is available
+  if (url === '/api/vms/status' && method === 'GET') {
+    const virshInstalled = !!(run('which virsh 2>/dev/null'));
+    const qemuInstalled = !!(run('which qemu-system-x86_64 2>/dev/null'));
+    const kvmSupport = run('grep -Ec "(vmx|svm)" /proc/cpuinfo 2>/dev/null') || '0';
+    const kvmLoaded = !!(run('lsmod 2>/dev/null | grep kvm'));
+    const libvirtdRunning = run('systemctl is-active libvirtd 2>/dev/null') === 'active';
+    const version = run('virsh version --daemon 2>/dev/null | head -1') || '';
+    
+    // Ensure dirs exist
+    run(`mkdir -p "${VM_DIR}" "${ISO_DIR}" 2>/dev/null`);
+    
+    return {
+      installed: virshInstalled && qemuInstalled,
+      kvmSupport: parseInt(kvmSupport) > 0,
+      kvmLoaded,
+      libvirtdRunning,
+      version,
+    };
+  }
+
+  // GET /api/vms/list — list all VMs
+  if (url === '/api/vms/list' && method === 'GET') {
+    const raw = run('virsh list --all 2>/dev/null') || '';
+    const vms = [];
+    const lines = raw.split('\n').filter(l => l.trim() && !l.includes('Id') && !l.includes('---'));
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 3) continue;
+      const id = parts[0] === '-' ? null : parts[0];
+      const name = parts[1];
+      const status = parts.slice(2).join(' ');
+      
+      // Get VM details
+      let cpu = '—', ram = '—', disk = '—', ip = '—';
+      try {
+        const info = run(`virsh dominfo "${name}" 2>/dev/null`) || '';
+        const cpuMatch = info.match(/CPU\(s\):\s+(\d+)/);
+        const ramMatch = info.match(/Max memory:\s+(\d+)/);
+        if (cpuMatch) cpu = cpuMatch[1];
+        if (ramMatch) ram = Math.round(parseInt(ramMatch[1]) / 1024 / 1024) + ' GB';
+      } catch {}
+      
+      // Try to get IP if running
+      if (status === 'running') {
+        try {
+          const ips = run(`virsh domifaddr "${name}" 2>/dev/null`) || '';
+          const ipMatch = ips.match(/(\d+\.\d+\.\d+\.\d+)/);
+          if (ipMatch) ip = ipMatch[1];
+        } catch {}
+      }
+      
+      // Get disk size
+      try {
+        const blk = run(`virsh domblklist "${name}" --details 2>/dev/null`) || '';
+        const diskLine = blk.split('\n').find(l => l.includes('disk'));
+        if (diskLine) {
+          const diskPath = diskLine.trim().split(/\s+/).pop();
+          if (diskPath && fs.existsSync(diskPath)) {
+            const sz = run(`qemu-img info "${diskPath}" 2>/dev/null | grep "virtual size"`) || '';
+            const szMatch = sz.match(/virtual size:\s+(.+?)(?:\s+\(|$)/);
+            if (szMatch) disk = szMatch[1];
+          }
+        }
+      } catch {}
+      
+      vms.push({ id, name, status, cpu, ram, disk, ip });
+    }
+    return { vms };
+  }
+
+  // GET /api/vms/overview — host stats
+  if (url === '/api/vms/overview' && method === 'GET') {
+    const hostname = run('hostname') || 'NimbusNAS';
+    const cpuUsage = run("top -bn1 | grep '%Cpu' | awk '{print $2}' 2>/dev/null") || '0';
+    const memInfo = run("free -m | awk '/Mem:/{printf \"%.0f\", $3/$2*100}' 2>/dev/null") || '0';
+    const nodeInfo = run('virsh nodeinfo 2>/dev/null') || '';
+    const totalCPUs = (nodeInfo.match(/CPU\(s\):\s+(\d+)/) || [,'?'])[1];
+    const totalRAM = (nodeInfo.match(/Memory size:\s+(\d+)/) || [,'?'])[1];
+    
+    // Count VMs
+    const raw = run('virsh list --all 2>/dev/null') || '';
+    const lines = raw.split('\n').filter(l => l.trim() && !l.includes('Id') && !l.includes('---'));
+    const running = lines.filter(l => l.includes('running')).length;
+    const total = lines.length;
+    
+    return { hostname, cpuUsage, memUsage: memInfo, totalCPUs, totalRAM, running, total };
+  }
+
+  // POST /api/vms/create — create a new VM
+  if (url === '/api/vms/create' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { name, os, cpus, ram, ramUnit, disk, diskUnit, networkType, iso, autoStart, firmware } = body;
+    if (!name) return { error: 'Name required' };
+    
+    // Sanitize name
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '');
+    const diskPath = `${VM_DIR}/${safeName}.qcow2`;
+    const diskSize = `${disk}${diskUnit === 'TB' ? 'T' : 'G'}`;
+    const ramMB = ramUnit === 'GB' ? parseInt(ram) * 1024 : parseInt(ram);
+    
+    try {
+      // Create disk
+      execSync(`qemu-img create -f qcow2 "${diskPath}" ${diskSize}`, { encoding: 'utf-8', timeout: 30000 });
+      
+      // Build virt-install command
+      let cmd = `virt-install --name "${safeName}"`;
+      cmd += ` --vcpus ${cpus || 2}`;
+      cmd += ` --memory ${ramMB || 2048}`;
+      cmd += ` --disk path="${diskPath}",format=qcow2`;
+      cmd += ` --os-variant generic`;
+      cmd += ` --graphics vnc,listen=0.0.0.0`;
+      
+      // Network
+      if (networkType === 'bridge') cmd += ` --network bridge=br0,model=virtio`;
+      else if (networkType === 'nat') cmd += ` --network network=default,model=virtio`;
+      else cmd += ` --network none`;
+      
+      // Firmware
+      if (firmware === 'UEFI') cmd += ` --boot uefi`;
+      
+      // ISO
+      if (iso) cmd += ` --cdrom "${ISO_DIR}/${iso}"`;
+      else cmd += ` --import --noautoconsole`;
+      
+      if (!iso) cmd += ` --noautoconsole`;
+      
+      const log = execSync(cmd + ' 2>&1', { encoding: 'utf-8', timeout: 60000 });
+      
+      if (autoStart) {
+        run(`virsh autostart "${safeName}" 2>/dev/null`);
+      }
+      
+      return { ok: true, name: safeName, log };
+    } catch (err) {
+      return { error: err.message || 'Failed to create VM' };
+    }
+  }
+
+  // POST /api/vms/action — start/stop/pause/resume/delete/restart
+  if (url === '/api/vms/action' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { name, action } = body;
+    if (!name || !action) return { error: 'Name and action required' };
+    
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '');
+    let result;
+    
+    switch (action) {
+      case 'start':
+        result = run(`virsh start "${safeName}" 2>&1`);
+        break;
+      case 'stop':
+        result = run(`virsh shutdown "${safeName}" 2>&1`);
+        break;
+      case 'force-stop':
+        result = run(`virsh destroy "${safeName}" 2>&1`);
+        break;
+      case 'pause':
+        result = run(`virsh suspend "${safeName}" 2>&1`);
+        break;
+      case 'resume':
+        result = run(`virsh resume "${safeName}" 2>&1`);
+        break;
+      case 'restart':
+        result = run(`virsh reboot "${safeName}" 2>&1`);
+        break;
+      case 'delete':
+        run(`virsh destroy "${safeName}" 2>/dev/null`);
+        run(`virsh undefine "${safeName}" --remove-all-storage 2>&1`);
+        result = 'VM deleted';
+        break;
+      case 'autostart-on':
+        result = run(`virsh autostart "${safeName}" 2>&1`);
+        break;
+      case 'autostart-off':
+        result = run(`virsh autostart --disable "${safeName}" 2>&1`);
+        break;
+      default:
+        return { error: 'Unknown action' };
+    }
+    
+    return { ok: true, result };
+  }
+
+  // GET /api/vms/isos — list available ISOs
+  if (url === '/api/vms/isos' && method === 'GET') {
+    run(`mkdir -p "${ISO_DIR}" 2>/dev/null`);
+    const files = run(`ls -lh "${ISO_DIR}"/*.iso 2>/dev/null`) || '';
+    const isos = [];
+    for (const line of files.split('\n').filter(Boolean)) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 9) {
+        const size = parts[4];
+        const name = path.basename(parts.slice(8).join(' '));
+        isos.push({ name, size });
+      }
+    }
+    return { isos, path: ISO_DIR };
+  }
+
+  // GET /api/vms/networks — list virtual networks
+  if (url === '/api/vms/networks' && method === 'GET') {
+    const raw = run('virsh net-list --all 2>/dev/null') || '';
+    const networks = [];
+    const lines = raw.split('\n').filter(l => l.trim() && !l.includes('Name') && !l.includes('---'));
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        networks.push({ name: parts[0], state: parts[1], autostart: parts[2] || '—', persistent: parts[3] || '—' });
+      }
+    }
+    
+    // Also get bridge info
+    const bridges = run('brctl show 2>/dev/null | tail -n +2') || '';
+    
+    return { networks, bridges };
+  }
+
+  // GET /api/vms/vnc/:name — get VNC port for a VM
+  if (url.startsWith('/api/vms/vnc/') && method === 'GET') {
+    const vmName = url.split('/').pop();
+    const display = run(`virsh vncdisplay "${vmName}" 2>/dev/null`) || '';
+    const port = display.trim() ? 5900 + parseInt(display.trim().replace(':', '')) : null;
+    return { port, display: display.trim() };
+  }
+
+  // GET /api/vms/logs — recent libvirt logs
+  if (url === '/api/vms/logs' && method === 'GET') {
+    const logs = run('journalctl -u libvirtd --no-pager -n 50 --output=short 2>/dev/null') || '';
+    return { logs };
+  }
+
+  // POST /api/vms/snapshot — create/list/revert snapshots
+  if (url === '/api/vms/snapshot' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { name, action: snapAction, snapshotName } = body;
+    if (!name) return { error: 'VM name required' };
+    
+    const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '');
+    
+    if (snapAction === 'create') {
+      const snapName = snapshotName || `snap-${Date.now()}`;
+      const result = run(`virsh snapshot-create-as "${safeName}" "${snapName}" 2>&1`);
+      return { ok: true, result };
+    }
+    if (snapAction === 'list') {
+      const result = run(`virsh snapshot-list "${safeName}" 2>/dev/null`) || '';
+      return { snapshots: result };
+    }
+    if (snapAction === 'revert') {
+      if (!snapshotName) return { error: 'Snapshot name required' };
+      const result = run(`virsh snapshot-revert "${safeName}" "${snapshotName}" 2>&1`);
+      return { ok: true, result };
+    }
+    if (snapAction === 'delete') {
+      if (!snapshotName) return { error: 'Snapshot name required' };
+      const result = run(`virsh snapshot-delete "${safeName}" "${snapshotName}" 2>&1`);
+      return { ok: true, result };
+    }
+    
+    return { error: 'Unknown snapshot action' };
+  }
+
+  return null;
+}
+
 function handleNativeApps(url, method, body, req) {
   const session = getSessionUser(req);
   
@@ -3487,13 +3777,18 @@ function handleNativeApps(url, method, body, req) {
       return {
         id,
         name: def.name,
+        description: def.description || '',
+        category: def.category || 'system',
         icon: def.icon,
         color: def.color,
         port: def.port,
         installed: status.installed,
         running: status.running,
         installCommand: def.installCommand,
-        isDesktop: def.isDesktop || false
+        uninstallCommand: def.uninstallCommand || null,
+        isDesktop: def.isDesktop || false,
+        isNativeApp: def.isNativeApp || false,
+        nimbusApp: def.nimbusApp || null,
       };
     });
     return { apps: available };
@@ -3537,6 +3832,50 @@ function handleNativeApps(url, method, body, req) {
     }
   }
   
+  // POST /api/native-apps/:id/install — install a native app
+  const installMatch = url.match(/^\/api\/native-apps\/([a-zA-Z0-9_-]+)\/install$/);
+  if (installMatch && method === 'POST') {
+    if (!session) return { error: 'Not authenticated' };
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    
+    const appId = installMatch[1];
+    const appDef = KNOWN_NATIVE_APPS[appId];
+    if (!appDef) return { error: 'Unknown app' };
+    if (!appDef.installCommand) return { error: 'No install command defined' };
+    
+    try {
+      const log = execSync(appDef.installCommand, { encoding: 'utf-8', timeout: 300000, stdio: 'pipe' });
+      // Register as installed
+      registerNativeApp({ id: appId, name: appDef.name, icon: appDef.icon, color: appDef.color, port: appDef.port, isDesktop: appDef.isDesktop || false, nimbusApp: appDef.nimbusApp || null });
+      return { ok: true, appId, log };
+    } catch (err) {
+      return { error: 'Installation failed', detail: err.stderr || err.message };
+    }
+  }
+  
+  // POST /api/native-apps/:id/uninstall — uninstall a native app
+  const uninstallMatch = url.match(/^\/api\/native-apps\/([a-zA-Z0-9_-]+)\/uninstall$/);
+  if (uninstallMatch && method === 'POST') {
+    if (!session) return { error: 'Not authenticated' };
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    
+    const appId = uninstallMatch[1];
+    const appDef = KNOWN_NATIVE_APPS[appId];
+    if (!appDef) return { error: 'Unknown app' };
+    
+    try {
+      if (appDef.uninstallCommand) {
+        execSync(appDef.uninstallCommand, { encoding: 'utf-8', timeout: 120000, stdio: 'pipe' });
+      }
+      // Remove from native apps list
+      const apps = getNativeApps().filter(a => a.id !== appId);
+      saveNativeApps(apps);
+      return { ok: true, appId };
+    } catch (err) {
+      return { error: 'Uninstall failed', detail: err.stderr || err.message };
+    }
+  }
+
   // GET /api/native-apps/:id/status — check status of specific native app
   const statusMatch = url.match(/^\/api\/native-apps\/([a-z]+)\/status$/);
   if (statusMatch && method === 'GET') {
@@ -5058,8 +5397,12 @@ function detectStorageDisks() {
     }
     
     // CLASSIFY per document rules
-    // Rule: USB -> skip
-    if (diskInfo.removable || diskInfo.transport === 'usb') {
+    // Rule: USB -> skip ONLY if small/removable (pendrives, SD cards)
+    // Large USB disks (HDDs, SSDs via USB) are eligible — important for RPi, mini PCs
+    const isUsb = diskInfo.transport === 'usb';
+    const minPoolDiskSize = 10 * 1024 * 1024 * 1024; // 10GB minimum for pool disks
+    
+    if (isUsb && (diskInfo.removable || size < minPoolDiskSize)) {
       diskInfo.classification = 'usb';
       result.usb.push(diskInfo);
       continue;
@@ -5338,12 +5681,16 @@ function createPool(name, disks, level, filesystem = 'ext4') {
     const detected = detectStorageDisks();
     const partitions = [];
     
+    // Check if basic tools exist
+    const hasSgdisk = !!(run('which sgdisk 2>/dev/null'));
+    const hasMdadm = !!(run('which mdadm 2>/dev/null'));
+    
     for (const disk of disks) {
       const diskInfo = detected.eligible.find(d => d.path === disk);
       const isBoot = diskInfo && diskInfo.isBoot;
       
       // Clear any existing RAID superblocks and LVM from this disk
-      if (!isBoot) {
+      if (!isBoot && hasMdadm) {
         // Stop any arrays this disk is part of
         const mdstat = readFile('/proc/mdstat') || '';
         const diskName = disk.replace('/dev/', '');
@@ -5367,14 +5714,42 @@ function createPool(name, disks, level, filesystem = 'ext4') {
       
       if (isBoot) {
         // Boot disk: find next available partition number and create in free space
-        // DO NOT wipe the disk — system partitions must survive
+        if (!hasSgdisk) return { error: 'sgdisk is required for boot disk partitioning. Install: sudo apt install gdisk' };
         const existingParts = diskInfo.partitions.length;
         const nextPartNum = existingParts + 1;
         execSync(`sgdisk -n ${nextPartNum}:0:0 -t ${nextPartNum}:FD00 -c ${nextPartNum}:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
         partitions.push(`${disk}${nextPartNum}`);
         console.log(`[Storage] Boot disk ${disk}: created partition ${nextPartNum} in free space`);
+      } else if (isSingleDisk) {
+        // Single non-boot disk: simple approach that works on any platform (Pi, mini PC, etc)
+        // Use wipefs + fdisk/sfdisk/sgdisk, whatever is available
+        execSync(`wipefs -a ${disk} 2>/dev/null || true`, { timeout: 10000 });
+        
+        if (hasSgdisk) {
+          execSync(`sgdisk -Z ${disk} 2>/dev/null || true`, { timeout: 10000 });
+          execSync(`sgdisk -n 1:0:0 -t 1:8300 -c 1:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
+        } else {
+          // Fallback: use sfdisk (always available on Debian/Ubuntu)
+          execSync(`echo ";" | sfdisk --force ${disk} 2>/dev/null || true`, { timeout: 10000 });
+        }
+        
+        // Detect partition name (handle /dev/sda1 vs /dev/mmcblk0p1)
+        execSync(`partprobe ${disk} 2>/dev/null || true`, { timeout: 5000 });
+        execSync('sleep 2');
+        
+        // Find the new partition
+        const newParts = run(`lsblk -lnp -o NAME ${disk} 2>/dev/null`) || '';
+        const partLines = newParts.trim().split('\n').filter(l => l.trim() !== disk);
+        if (partLines.length > 0) {
+          partitions.push(partLines[partLines.length - 1].trim());
+        } else {
+          // No partition table needed — format the whole disk directly
+          partitions.push(disk);
+        }
+        console.log(`[Storage] Single disk ${disk}: partition ${partitions[partitions.length - 1]}`);
       } else {
-        // Clean disk: wipe and use entire disk
+        // Multi-disk RAID: need sgdisk
+        if (!hasSgdisk) return { error: 'sgdisk is required for RAID. Install: sudo apt install gdisk' };
         execSync(`sgdisk -Z ${disk} 2>/dev/null || true`, { timeout: 10000 });
         execSync(`sgdisk -n 1:0:0 -t 1:FD00 -c 1:"NIMBUS-DATA" ${disk}`, { timeout: 10000 });
         partitions.push(`${disk}1`);
@@ -6139,6 +6514,26 @@ const server = http.createServer((req, res) => {
     const statusCode = result.error ? 400 : 200;
     res.writeHead(statusCode, CORS_HEADERS);
     return res.end(JSON.stringify(result));
+  }
+
+  // ── Virtual Machines routes ──
+  if (url.startsWith('/api/vms')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleVMs(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleVMs(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
   }
 
   // ── Native Apps routes ──
