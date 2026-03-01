@@ -165,21 +165,8 @@ install_node() {
 
 # ── Install Docker ──
 install_docker() {
-  step "Installing Docker"
-
-  if command -v docker &>/dev/null; then
-    ok "Docker $(docker --version | cut -d' ' -f3 | tr -d ',') already installed — skipping"
-    return
-  fi
-
-  curl -fsSL https://get.docker.com | sh
-
-  # Enable and start
-  systemctl enable docker
-  systemctl start docker
-
-  # Add nimbus user to docker group (created later)
-  ok "Docker $(docker --version | cut -d' ' -f3 | tr -d ',') installed"
+  step "Docker"
+  ok "Docker available in App Store — install after creating a storage pool"
 }
 
 # ── Create NimbusOS user and directories ──
@@ -289,8 +276,8 @@ install_service() {
 [Unit]
 Description=NimbusOS - NAS Operating System
 Documentation=https://github.com/nimbusos-project/nimbusos
-After=network-online.target docker.service
-Wants=network-online.target docker.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
