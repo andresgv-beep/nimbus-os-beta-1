@@ -14,7 +14,6 @@ const DOCKER_APP = {
   description: 'Motor de contenedores. Requerido para instalar otras aplicaciones.',
   icon: '🐳',
   category: 'system',
-  isBase: true,
   official: true,
   version: '24.0',
 };
@@ -764,6 +763,22 @@ export default function AppStore() {
   };
   
   const handleUninstall = async (app) => {
+    // Docker uninstall — special case
+    if (app.id === 'docker') {
+      if (!confirm('¿Desinstalar Docker? Se eliminarán TODOS los contenedores y datos de Docker.')) return;
+      try {
+        const res = await fetch('/api/docker/uninstall', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        });
+        const data = await res.json();
+        if (data.error) { alert(`Error: ${data.error}`); return; }
+        setDockerStatus({ installed: false, path: null, hasPermission: true });
+        setInstalledApps([]);
+      } catch (err) { alert(`Error: ${err.message}`); }
+      return;
+    }
+    
     if (!confirm(`¿Desinstalar ${app.name}?`)) return;
     
     try {
