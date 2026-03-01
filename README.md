@@ -1,4 +1,4 @@
-# ☁️ NimbusOS
+#  NimbusOS
 
 **A modern, open-source NAS operating system** with a desktop-like web interface.
 
@@ -6,21 +6,21 @@ Transform any Ubuntu Server into a powerful NAS with Docker container management
 
 ---
 
-## ✨ Features
+##  Features
 
-- 🖥️ **Desktop UI** — Glass-effect windowed interface with taskbar, dock, and app launcher
-- 🐳 **Docker Management** — Install, configure, and manage containers from the App Store
-- 📁 **File Manager** — Browse, upload, download files with drag-and-drop
-- 💾 **Storage Manager** — RAID configuration, disk health monitoring (SMART)
-- 🌐 **Network Manager** — Firewall rules, port scanning, UPnP router forwarding, DDNS
-- 📊 **System Monitor** — CPU, RAM, GPU, temperatures in real-time
-- 🎵 **Media Player** — Built-in audio/video player
-- 📝 **Text Editor** — Edit configuration files from the browser
-- 🔐 **Multi-user** — Admin and standard accounts with role-based access
-- 🎨 **Themes** — Dark, Midnight, and Light (warm cream) themes
-- 🖥️ **GPU Support** — NVIDIA/AMD driver management from the UI
+-  **Desktop UI** — Glass-effect windowed interface with taskbar, dock, and app launcher
+-  **Docker Management** — Install, configure, and manage containers from the App Store
+-  **File Manager** — Browse, upload, download files with drag-and-drop
+-  **Storage Manager** — RAID configuration, disk health monitoring (SMART)
+-  **Network Manager** — Firewall rules, port scanning, UPnP router forwarding, DDNS
+-  **System Monitor** — CPU, RAM, GPU, temperatures in real-time
+-  **Media Player** — Built-in audio/video player
+-  **Text Editor** — Edit configuration files from the browser
+-  **Multi-user** — Admin and standard accounts with role-based access
+-  **Themes** — Dark, Midnight, and Light (warm cream) themes
+-  **GPU Support** — NVIDIA/AMD driver management from the UI
 
-## 📋 Requirements
+##  Requirements
 
 - **OS**: Ubuntu Server 22.04+ or Debian 12+
 - **CPU**: x86_64 or ARM64 (aarch64)
@@ -28,7 +28,7 @@ Transform any Ubuntu Server into a powerful NAS with Docker container management
 - **Disk**: 2GB free for NimbusOS + storage for your data
 - **Network**: Ethernet connection
 
-## 🚀 Quick Install
+##  Quick Install
 
 One command on a fresh Ubuntu Server:
 
@@ -53,7 +53,7 @@ npm install --production
 sudo node server/index.cjs
 ```
 
-## 🔧 Management
+##  Management
 
 ```bash
 # Service control
@@ -68,7 +68,7 @@ sudo /opt/nimbusos/scripts/update.sh
 sudo /opt/nimbusos/scripts/uninstall.sh
 ```
 
-## 📁 Directory Structure
+##  Directory Structure
 
 ```
 /opt/nimbusos/          # Application code
@@ -77,7 +77,7 @@ sudo /opt/nimbusos/scripts/uninstall.sh
 /var/log/nimbusos/      # Logs
 ```
 
-## 🌐 Default Ports
+##  Default Ports
 
 | Port | Service | Description |
 |------|---------|-------------|
@@ -86,7 +86,7 @@ sudo /opt/nimbusos/scripts/uninstall.sh
 | 445  | Samba | Windows file sharing |
 | 5353 | Avahi | mDNS discovery |
 
-## 🔒 Security
+##  Security
 
 NimbusOS includes:
 - UFW firewall with sensible defaults
@@ -101,7 +101,7 @@ For remote access, we recommend:
 2. **WireGuard VPN**
 3. **Reverse Proxy + Let's Encrypt** (via DDNS)
 
-## 🏗️ Architecture
+##  Architecture
 
 ```
 Browser ──→ Vite (dev) / Static (prod) ──→ Node.js Backend
@@ -112,11 +112,11 @@ Browser ──→ Vite (dev) / Static (prod) ──→ Node.js Backend
                                               └── File System (SMB, NFS)
 ```
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions are welcome! Please open an issue first to discuss major changes.
 
-## 📄 License
+##  License
 
 MIT License — see [LICENSE](LICENSE)
 
