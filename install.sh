@@ -101,10 +101,18 @@ install_deps() {
     smartmontools hdparm lm-sensors \
     mdadm gdisk \
     samba \
+    vsftpd \
+    apache2 \
+    certbot \
     ufw \
     avahi-daemon
 
   ok "Core packages installed"
+
+  # Enable Apache WebDAV modules
+  log "Configuring Apache WebDAV modules..."
+  a2enmod dav dav_fs headers auth_basic authn_file 2>/dev/null || true
+  ok "Apache WebDAV modules enabled"
 
   # Optional packages (nice to have, don't fail)
   log "Installing optional packages..."
@@ -118,6 +126,8 @@ install_deps() {
   command -v smbd &>/dev/null || missing="$missing samba"
   command -v mdadm &>/dev/null || missing="$missing mdadm"
   command -v smartctl &>/dev/null || missing="$missing smartmontools"
+  command -v vsftpd &>/dev/null || missing="$missing vsftpd"
+  command -v apache2 &>/dev/null || missing="$missing apache2"
 
   if [[ -n "$missing" ]]; then
     err "Failed to install critical packages:$missing"
@@ -340,6 +350,10 @@ setup_firewall() {
   ufw allow "$NIMBUS_PORT"/tcp comment 'NimbusOS Web UI' 2>/dev/null || true
   ufw allow 445/tcp comment 'Samba (SMB)' 2>/dev/null || true
   ufw allow 5353/udp comment 'Avahi (mDNS)' 2>/dev/null || true
+  ufw allow 21/tcp comment 'FTP' 2>/dev/null || true
+  ufw allow 55000:55999/tcp comment 'FTP Passive' 2>/dev/null || true
+  ufw allow 5005/tcp comment 'WebDAV' 2>/dev/null || true
+  ufw allow 2049/tcp comment 'NFS' 2>/dev/null || true
 
   # Enable firewall (non-interactive)
   echo "y" | ufw enable 2>/dev/null || true
@@ -379,6 +393,89 @@ EOF
   systemctl restart smbd nmbd 2>/dev/null || true
 
   ok "Samba configured"
+}
+
+# ── Configure vsftpd (FTP) ──
+setup_ftp() {
+  step "Configuring FTP (vsftpd)"
+
+  [[ -f /etc/vsftpd.conf ]] && cp /etc/vsftpd.conf /etc/vsftpd.conf.bak
+
+  cat > /etc/vsftpd.conf << 'EOF'
+# NimbusOS FTP Configuration
+listen=YES
+listen_ipv6=NO
+anonymous_enable=NO
+local_enable=YES
+write_enable=YES
+local_umask=022
+dirmessage_enable=YES
+use_localtime=YES
+xferlog_enable=YES
+connect_from_port_20=YES
+chroot_local_user=YES
+allow_writeable_chroot=YES
+secure_chroot_dir=/var/run/vsftpd/empty
+pam_service_name=vsftpd
+# Passive mode
+pasv_enable=YES
+pasv_min_port=55000
+pasv_max_port=55999
+# Security
+ssl_enable=NO
+EOF
+
+  systemctl enable vsftpd 2>/dev/null || true
+  systemctl restart vsftpd 2>/dev/null || true
+
+  ok "FTP configured (port 21, passive 55000-55999)"
+}
+
+# ── Configure Apache WebDAV ──
+setup_webdav() {
+  step "Configuring WebDAV (Apache)"
+
+  # Disable default site — NimbusOS uses port 5000, Apache only for WebDAV
+  a2dissite 000-default 2>/dev/null || true
+
+  # Create WebDAV directory
+  mkdir -p /var/lib/dav
+  chown www-data:www-data /var/lib/dav
+
+  # Create WebDAV vhost
+  cat > /etc/apache2/sites-available/nimbusos-webdav.conf << 'EOF'
+Listen 5005
+<VirtualHost *:5005>
+    ServerName localhost
+    DocumentRoot /var/www/webdav
+
+    <Directory /var/www/webdav>
+        Options Indexes
+        DAV On
+        AuthType Basic
+        AuthName "NimbusOS WebDAV"
+        AuthUserFile /etc/apache2/.htpasswd-webdav
+        Require valid-user
+    </Directory>
+
+    DavLockDB /var/lib/dav/lockdb
+    ErrorLog ${APACHE_LOG_DIR}/webdav-error.log
+    CustomLog ${APACHE_LOG_DIR}/webdav-access.log combined
+</VirtualHost>
+EOF
+
+  # Create webdav root and htpasswd
+  mkdir -p /var/www/webdav
+  chown www-data:www-data /var/www/webdav
+  touch /etc/apache2/.htpasswd-webdav
+
+  a2ensite nimbusos-webdav 2>/dev/null || true
+  
+  # Don't start Apache yet — user enables it from NimbusOS UI
+  systemctl enable apache2 2>/dev/null || true
+  systemctl stop apache2 2>/dev/null || true
+
+  ok "WebDAV configured (port 5005, stopped until enabled from UI)"
 }
 
 # ── Configure Avahi (mDNS/Bonjour) ──
@@ -459,6 +556,10 @@ print_summary() {
   echo -e "    Docker:  $(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',' || echo 'not found')"
   echo -e "    Node.js: $(node -v 2>/dev/null || echo 'not found')"
   echo -e "    Samba:   $(smbd --version 2>/dev/null || echo 'not found')"
+  echo -e "    FTP:     $(vsftpd -v 2>&1 | head -1 2>/dev/null || echo 'not found')"
+  echo -e "    WebDAV:  $(apache2 -v 2>/dev/null | head -1 || echo 'not found')"
+  echo -e "    NFS:     $(cat /proc/fs/nfsd/versions 2>/dev/null && echo 'installed' || echo 'not found')"
+  echo -e "    Certbot: $(certbot --version 2>/dev/null || echo 'not found')"
   echo -e "    UFW:     $(ufw status 2>/dev/null | head -1 || echo 'not found')"
   echo ""
   echo -e "  ${BOLD}Paths:${NC}"
@@ -491,6 +592,8 @@ main() {
   install_service
   setup_firewall
   setup_samba
+  setup_ftp
+  setup_webdav
   setup_avahi
   start_nimbusos
   print_summary
