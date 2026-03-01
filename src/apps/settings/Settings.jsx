@@ -170,10 +170,30 @@ function AppearancePage() {
     { value: 120, label: 'XL' },
   ];
 
+  const PerfIcon = ({ mode }) => {
+    const colors = { full: 'var(--accent)', balanced: 'var(--accent-amber)', performance: 'var(--accent-green)' };
+    const color = colors[mode] || 'var(--text-muted)';
+    if (mode === 'full') return (
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M6 8h2M10 8h2M14 8h2" strokeWidth="2"/>
+      </svg>
+    );
+    if (mode === 'balanced') return (
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M8 8h2M14 8h2" strokeWidth="2"/>
+      </svg>
+    );
+    return (
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M11 8h2" strokeWidth="2"/>
+      </svg>
+    );
+  };
+
   const PERF_OPTIONS = [
-    { id: 'full', label: 'Full', desc: 'All effects enabled', icon: '/src/icons/perf/full.png' },
-    { id: 'balanced', label: 'Balanced', desc: 'Reduced blur', icon: '/src/icons/perf/balanced.png' },
-    { id: 'performance', label: 'Performance', desc: 'Flat, no effects', icon: '/src/icons/perf/performance.png' },
+    { id: 'full', label: 'Full', desc: 'All effects enabled' },
+    { id: 'balanced', label: 'Balanced', desc: 'Reduced blur' },
+    { id: 'performance', label: 'Performance', desc: 'Flat, no effects' },
   ];
 
   // GPU tier display
@@ -195,7 +215,13 @@ function AppearancePage() {
           Performance
           {serverGpu?.gpus?.length > 0 ? (
             <span className={styles.gpuBadge} style={{ color: 'var(--accent-green)' }}>
-              {serverGpu.gpus.length > 1 ? `${serverGpu.gpus.length} GPUs` : 'Dedicated GPU'}
+              {serverGpu.gpus.length > 1 ? `${serverGpu.gpus.length} GPUs` 
+                : serverGpu.gpus[0]?.vendor === 'broadcom' ? 'VideoCore'
+                : serverGpu.gpus[0]?.vendor === 'arm' ? 'ARM GPU'
+                : serverGpu.gpus[0]?.vendor === 'intel' ? 'Intel GPU'
+                : serverGpu.gpus[0]?.vendor === 'amd' ? 'AMD GPU'
+                : serverGpu.gpus[0]?.vendor === 'nvidia' ? 'NVIDIA GPU'
+                : 'GPU'}
             </span>
           ) : gpuInfo ? (
             <span className={styles.gpuBadge} style={{ color: gpuTierLabel.color }}>
@@ -211,10 +237,14 @@ function AppearancePage() {
             {serverGpu.currentDriver && <span className={styles.gpuAuto}>Driver: {serverGpu.currentDriver} {serverGpu.driverVersion || ''}</span>}
             {!serverGpu.currentDriver && <span className={styles.gpuAuto}>No proprietary driver loaded</span>}
           </div>
-        ) : gpuInfo ? (
+        ) : !serverGpu && gpuInfo ? (
           <div className={styles.gpuInfo}>
             <span className={styles.gpuRenderer}>{gpuInfo.renderer}</span>
             {!perfIsManual && <span className={styles.gpuAuto}>Auto-configured</span>}
+          </div>
+        ) : !serverGpu ? (
+          <div className={styles.gpuInfo}>
+            <span className={styles.gpuAuto}>Detecting GPU...</span>
           </div>
         ) : null}
 
@@ -226,7 +256,7 @@ function AppearancePage() {
               className={`${styles.perfOption} ${perfLevel === opt.id ? styles.perfOptionActive : ''}`}
               onClick={() => setPerfLevel(opt.id, true)}
             >
-              <img src={opt.icon} alt={opt.label} className={styles.perfIcon} />
+              <PerfIcon mode={opt.id} />
               <div className={styles.perfText}>
                 <span className={styles.perfLabel}>{opt.label}</span>
                 <span className={styles.perfDesc}>{opt.desc}</span>
