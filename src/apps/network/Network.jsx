@@ -95,320 +95,6 @@ function ServicePage({ title, description, enabled, onToggle, port, protocol, fi
   );
 }
 
-/* ─── SMB Page (real data) ─── */
-function SMBPage() {
-  const [status, setStatus] = useState({ running: false, smbd: false, nmbd: false, version: null });
-  const [config, setConfig] = useState({ global: {}, shares: [] });
-  const [shares, setShares] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showAddShare, setShowAddShare] = useState(false);
-  const [editingShare, setEditingShare] = useState(null);
-  const [newShare, setNewShare] = useState({
-    name: '', path: '', comment: '', browseable: true, readonly: false, guestOk: false, validUsers: ''
-  });
-
-  const fetchData = async () => {
-    try {
-      const [statusRes, configRes, sharesRes] = await Promise.all([
-        fetch('/api/smb/status').then(r => r.json()),
-        fetch('/api/smb/config').then(r => r.json()),
-        fetch('/api/smb/shares').then(r => r.json()),
-      ]);
-      setStatus(statusRes);
-      setConfig(configRes);
-      setShares(Array.isArray(sharesRes) ? sharesRes : []);
-    } catch (e) {
-      console.error('Failed to fetch SMB data:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, []);
-
-  const toggleService = async () => {
-    const endpoint = status.running ? '/api/smb/disable' : '/api/smb/enable';
-    try {
-      const res = await fetch(endpoint, { method: 'POST' });
-      const data = await res.json();
-      setStatus(data);
-    } catch (e) {
-      console.error('Failed to toggle SMB:', e);
-    }
-  };
-
-  const handleAddShare = async () => {
-    if (!newShare.name || !newShare.path) return;
-    try {
-      const res = await fetch('/api/smb/shares/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newShare),
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-      } else {
-        setShowAddShare(false);
-        setNewShare({ name: '', path: '', comment: '', browseable: true, readonly: false, guestOk: false, validUsers: '' });
-        fetchData();
-      }
-    } catch (e) {
-      console.error('Failed to add share:', e);
-    }
-  };
-
-  const handleDeleteShare = async (name) => {
-    if (!confirm(`Delete share "${name}"?`)) return;
-    try {
-      await fetch('/api/smb/shares/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      });
-      fetchData();
-    } catch (e) {
-      console.error('Failed to delete share:', e);
-    }
-  };
-
-  const handleUpdateShare = async () => {
-    if (!editingShare) return;
-    try {
-      const res = await fetch('/api/smb/shares/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingShare),
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-      } else {
-        setEditingShare(null);
-        fetchData();
-      }
-    } catch (e) {
-      console.error('Failed to update share:', e);
-    }
-  };
-
-  if (loading) {
-    return <div className={styles.loading}>Loading SMB configuration...</div>;
-  }
-
-  const globalConfig = config.global || {};
-
-  return (
-    <div>
-      <div className={styles.serviceHeader}>
-        <div>
-          <h3 className={styles.title}>SMB / CIFS</h3>
-          <p className={styles.desc}>Share folders with Windows, macOS, and Linux devices on your local network</p>
-        </div>
-        <Toggle on={status.running} onChange={toggleService} />
-      </div>
-
-      <div className={styles.serviceGrid}>
-        <div className={styles.serviceCard}>
-          <div className={styles.serviceCardTitle}>Status</div>
-          <div className={`${styles.statusBadge} ${status.running ? styles.statusRunning : styles.statusStopped}`}>
-            <span className={styles.statusDot} />
-            {status.running ? 'Running' : 'Stopped'}
-          </div>
-        </div>
-        <div className={styles.serviceCard}>
-          <div className={styles.serviceCardTitle}>Port</div>
-          <div className={styles.serviceValue}>445</div>
-        </div>
-        <div className={styles.serviceCard}>
-          <div className={styles.serviceCardTitle}>Version</div>
-          <div className={styles.serviceValue}>{status.version || 'Unknown'}</div>
-        </div>
-      </div>
-
-      <div className={styles.configCard}>
-        <div className={styles.configTitle}>Configuration</div>
-        <div className={styles.configRow}>
-          <span className={styles.configLabel}>Workgroup</span>
-          <span className={styles.configValue}>{globalConfig.workgroup || 'WORKGROUP'}</span>
-        </div>
-        <div className={styles.configRow}>
-          <span className={styles.configLabel}>Server string</span>
-          <span className={styles.configValue}>{globalConfig['server string'] || 'NimbusOS NAS'}</span>
-        </div>
-        <div className={styles.configRow}>
-          <span className={styles.configLabel}>Min protocol</span>
-          <span className={styles.configValue}>{globalConfig['min protocol'] || 'SMB2'}</span>
-        </div>
-        <div className={styles.configRow}>
-          <span className={styles.configLabel}>Max protocol</span>
-          <span className={styles.configValue}>{globalConfig['max protocol'] || 'SMB3'}</span>
-        </div>
-        <div className={styles.configRow}>
-          <span className={styles.configLabel}>Guest access</span>
-          <span className={styles.configValue}>{globalConfig['map to guest'] === 'never' ? 'Disabled' : 'Bad user → Guest'}</span>
-        </div>
-      </div>
-
-      <div className={styles.configCard}>
-        <div className={styles.configTitleRow}>
-          <span className={styles.configTitle}>Shared Folders</span>
-          <button className={styles.addBtn} onClick={() => setShowAddShare(true)}>+ Add Share</button>
-        </div>
-        
-        {shares.length === 0 ? (
-          <div className={styles.emptyState}>No shares configured. Click "Add Share" to create one.</div>
-        ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr><th>Name</th><th>Path</th><th>Access</th><th>Options</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {shares.map((s, i) => (
-                <tr key={i}>
-                  <td className={styles.cellName}>{s.name}</td>
-                  <td className={styles.mono}>{s.path}</td>
-                  <td>{s.validUsers || (s.guestOk ? 'Guest allowed' : 'Authenticated users')}</td>
-                  <td>
-                    {s.readonly ? '📖 Read-only' : '✏️ Read/Write'}
-                    {s.browseable === false && ' · Hidden'}
-                  </td>
-                  <td>
-                    <button className={styles.actionBtnSmall} onClick={() => setEditingShare({...s})}>Edit</button>
-                    <button className={styles.actionBtnSmall} onClick={() => handleDeleteShare(s.name)}>Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Add Share Modal */}
-      {showAddShare && (
-        <div className={styles.modalOverlay} onClick={() => setShowAddShare(false)}>
-          <div className={styles.modal} onClick={e => e.stopPropagation()}>
-            <h3 className={styles.modalTitle}>Add SMB Share</h3>
-            <div className={styles.formGroup}>
-              <label>Share Name</label>
-              <input 
-                type="text" 
-                value={newShare.name}
-                onChange={e => setNewShare({...newShare, name: e.target.value})}
-                placeholder="e.g. Media, Documents, Backups"
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label>Path</label>
-              <input 
-                type="text" 
-                value={newShare.path}
-                onChange={e => setNewShare({...newShare, path: e.target.value})}
-                placeholder="e.g. /mnt/data/media"
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label>Comment (optional)</label>
-              <input 
-                type="text" 
-                value={newShare.comment}
-                onChange={e => setNewShare({...newShare, comment: e.target.value})}
-                placeholder="Description of this share"
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label>Valid Users (optional)</label>
-              <input 
-                type="text" 
-                value={newShare.validUsers}
-                onChange={e => setNewShare({...newShare, validUsers: e.target.value})}
-                placeholder="e.g. admin, @family (leave empty for all)"
-              />
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={newShare.browseable} onChange={e => setNewShare({...newShare, browseable: e.target.checked})} />
-                Browseable (visible in network)
-              </label>
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={newShare.readonly} onChange={e => setNewShare({...newShare, readonly: e.target.checked})} />
-                Read-only
-              </label>
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={newShare.guestOk} onChange={e => setNewShare({...newShare, guestOk: e.target.checked})} />
-                Allow guest access (no password)
-              </label>
-            </div>
-            <div className={styles.modalActions}>
-              <button className={styles.cancelBtn} onClick={() => setShowAddShare(false)}>Cancel</button>
-              <button className={styles.saveBtn} onClick={handleAddShare}>Create Share</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Share Modal */}
-      {editingShare && (
-        <div className={styles.modalOverlay} onClick={() => setEditingShare(null)}>
-          <div className={styles.modal} onClick={e => e.stopPropagation()}>
-            <h3 className={styles.modalTitle}>Edit Share: {editingShare.name}</h3>
-            <div className={styles.formGroup}>
-              <label>Path</label>
-              <input 
-                type="text" 
-                value={editingShare.path}
-                onChange={e => setEditingShare({...editingShare, path: e.target.value})}
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label>Comment</label>
-              <input 
-                type="text" 
-                value={editingShare.comment || ''}
-                onChange={e => setEditingShare({...editingShare, comment: e.target.value})}
-              />
-            </div>
-            <div className={styles.formGroup}>
-              <label>Valid Users</label>
-              <input 
-                type="text" 
-                value={editingShare.validUsers || ''}
-                onChange={e => setEditingShare({...editingShare, validUsers: e.target.value})}
-              />
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={editingShare.browseable !== false} onChange={e => setEditingShare({...editingShare, browseable: e.target.checked})} />
-                Browseable
-              </label>
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={editingShare.readonly === true} onChange={e => setEditingShare({...editingShare, readonly: e.target.checked})} />
-                Read-only
-              </label>
-            </div>
-            <div className={styles.checkboxRow}>
-              <label>
-                <input type="checkbox" checked={editingShare.guestOk === true} onChange={e => setEditingShare({...editingShare, guestOk: e.target.checked})} />
-                Allow guest access
-              </label>
-            </div>
-            <div className={styles.modalActions}>
-              <button className={styles.cancelBtn} onClick={() => setEditingShare(null)}>Cancel</button>
-              <button className={styles.saveBtn} onClick={handleUpdateShare}>Save Changes</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ─── Port Exposure Page (real data) ─── */
 function PortsPage() {
   const [ports, setPorts] = useState([]);
@@ -1243,7 +929,28 @@ export default function Network() {
       case 'certs': return <CertsPage />;
       case 'firewall': return <FirewallPage />;
       case 'fail2ban': return <Fail2banPage />;
-      case 'smb': return <SMBPage />;
+      case 'smb': return (
+        <ServicePage
+          title="SMB / CIFS"
+          description="Share folders with Windows, macOS, and Linux devices on your local network"
+          enabled={services.smb}
+          onToggle={() => toggleService('smb')}
+          port="445"
+          protocol="TCP"
+          fields={[
+            { label: 'Workgroup', value: 'WORKGROUP' },
+            { label: 'Server string', value: 'NimbusOS NAS' },
+            { label: 'Min protocol', value: 'SMB2' },
+            { label: 'Max protocol', value: 'SMB3' },
+            { label: 'Guest access', value: 'Disabled' },
+          ]}
+          shares={[
+            { name: 'Public', path: '/volume1/public', access: 'Everyone (read)', status: 'Active' },
+            { name: 'Media', path: '/volume1/media', access: 'admin, media', status: 'Active' },
+            { name: 'Backups', path: '/volume1/backups', access: 'admin only', status: 'Active' },
+          ]}
+        />
+      );
       case 'ftp': return (
         <ServicePage
           title="FTP / SFTP"
