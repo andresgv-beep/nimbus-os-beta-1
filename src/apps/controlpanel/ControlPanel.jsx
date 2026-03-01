@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@context';
 import PortalPage from './PortalPage';
@@ -901,6 +901,35 @@ function UpdatesPage() {
   );
 }
 
+/* ─── QR Code component ─── */
+function QrCode({ data, size = 180 }) {
+  const [svgData, setSvgData] = useState(null);
+  const { token } = useAuth();
+
+  useEffect(() => {
+    if (!data) return;
+    // Ask the backend to generate the QR as SVG
+    fetch('/api/auth/2fa/qr', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: data })
+    })
+    .then(r => r.json())
+    .then(d => { if (d.svg) setSvgData(d.svg); })
+    .catch(() => {});
+  }, [data]);
+
+  if (!svgData) {
+    return (
+      <div style={{ width: size, height: size, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#666', textAlign: 'center', padding: 8, background: '#fff', borderRadius: 4 }}>
+        Generating QR...
+      </div>
+    );
+  }
+
+  return <div style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svgData }} />;
+}
+
 function LoginSettingsPage() {
   const { token, user } = useAuth();
   const headers = { 'Authorization': `Bearer ${token}` };
@@ -947,6 +976,8 @@ function LoginSettingsPage() {
     setTwoFaSetup(d);
   };
 
+  const [backupCodes, setBackupCodes] = useState(null);
+
   const handleVerify2FA = async () => {
     if (!twoFaCode || twoFaCode.length !== 6) { setTwoFaMsg({ type: 'error', text: 'Enter the 6-digit code' }); return; }
     const r = await fetch('/api/auth/2fa/verify', { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ code: twoFaCode }) });
@@ -955,6 +986,7 @@ function LoginSettingsPage() {
     setTwoFaEnabled(true);
     setTwoFaSetup(null);
     setTwoFaCode('');
+    if (d.backupCodes) setBackupCodes(d.backupCodes);
     setTwoFaMsg({ type: 'ok', text: '2FA enabled successfully' });
   };
 
@@ -1021,7 +1053,7 @@ function LoginSettingsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
               <div style={{ background: 'white', padding: 8, borderRadius: 'var(--radius)', flexShrink: 0 }}>
-                <img src={twoFaSetup.qrUrl} alt="QR Code" width={180} height={180} />
+                <QrCode data={twoFaSetup.uri} size={180} />
               </div>
               <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 <p style={{ marginBottom: 8 }}>1. Open your authenticator app</p>
@@ -1056,6 +1088,23 @@ function LoginSettingsPage() {
         )}
 
         {twoFaMsg && <div style={msgStyle(twoFaMsg.type)}>{twoFaMsg.text}</div>}
+
+        {backupCodes && (
+          <div style={{ marginTop: 16, padding: 16, background: 'rgba(255,152,0,0.05)', border: '1px solid rgba(255,152,0,0.15)', borderRadius: 'var(--radius)' }}>
+            <div style={{ fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-medium)', color: 'var(--accent-amber)', marginBottom: 8 }}>
+              Recovery Codes
+            </div>
+            <p style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+              Save these codes in a safe place. Each code can only be used once to log in if you lose access to your authenticator app.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+              {backupCodes.map((code, i) => (
+                <span key={i} style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', padding: '4px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>{code}</span>
+              ))}
+            </div>
+            <button style={{ ...btnSecondary, marginTop: 12 }} onClick={() => setBackupCodes(null)}>I have saved these codes</button>
+          </div>
+        )}
       </div>
     </div>
   );
