@@ -5722,7 +5722,25 @@ function createPool(name, disks, level, filesystem = 'ext4') {
         console.log(`[Storage] Boot disk ${disk}: created partition ${nextPartNum} in free space`);
       } else if (isSingleDisk) {
         // Single non-boot disk: simple approach that works on any platform (Pi, mini PC, etc)
-        // Use wipefs + fdisk/sfdisk/sgdisk, whatever is available
+        
+        // First: unmount ALL partitions on this disk
+        if (diskInfo && diskInfo.partitions) {
+          for (const part of diskInfo.partitions) {
+            if (part.mountpoint) {
+              console.log(`[Storage] Unmounting ${part.path} (was mounted at ${part.mountpoint})`);
+              execSync(`umount -f ${part.path} 2>/dev/null || true`, { timeout: 10000 });
+            }
+          }
+        }
+        // Also try unmounting the disk itself
+        execSync(`umount -f ${disk} 2>/dev/null || true`, { timeout: 5000 });
+        // Remove any fstab entries for this disk
+        execSync(`sed -i '\\|${disk}|d' /etc/fstab 2>/dev/null || true`, { timeout: 5000 });
+        
+        // Wait for unmount
+        execSync('sleep 1');
+        
+        // Wipe and repartition
         execSync(`wipefs -a ${disk} 2>/dev/null || true`, { timeout: 10000 });
         
         if (hasSgdisk) {
@@ -5874,37 +5892,69 @@ function wipeDisk(diskPath) {
     return { error: `Disk is part of pool "${inPool.name}". Destroy the pool first.` };
   }
   
+  const hasSgdisk = !!(run('which sgdisk 2>/dev/null'));
+  const hasMdadm = !!(run('which mdadm 2>/dev/null'));
+  
   try {
-    // 1. Stop any RAID arrays this disk participates in
-    const mdstat = readFile('/proc/mdstat') || '';
-    const diskName = diskPath.replace('/dev/', '');
-    const lines = mdstat.split('\n');
-    for (const line of lines) {
-      if (line.includes(diskName)) {
-        const arrayMatch = line.match(/^(md\d+)/);
-        if (arrayMatch) {
-          console.log(`[Storage] Stopping array /dev/${arrayMatch[1]} (contains ${diskPath})`);
-          execSync(`mdadm --stop /dev/${arrayMatch[1]} 2>/dev/null || true`, { timeout: 10000 });
-        }
+    // 1. Unmount ALL mounted partitions on this disk
+    for (const part of diskInfo.partitions) {
+      if (part.mountpoint) {
+        console.log(`[Storage] Unmounting ${part.path} from ${part.mountpoint}`);
+        execSync(`umount -f ${part.path} 2>/dev/null || true`, { timeout: 10000 });
       }
     }
+    execSync(`umount -f ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
+    // Remove fstab entries for this disk
+    const diskName = diskPath.replace('/dev/', '');
+    execSync(`sed -i '\\|${diskPath}|d' /etc/fstab 2>/dev/null || true`, { timeout: 5000 });
+    execSync(`sed -i '\\|${diskName}|d' /etc/fstab 2>/dev/null || true`, { timeout: 5000 });
     
-    // 2. Clear RAID superblocks from all partitions
-    for (const part of diskInfo.partitions) {
-      execSync(`mdadm --zero-superblock ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+    execSync('sleep 1');
+    
+    // 2. Stop any RAID arrays this disk participates in
+    if (hasMdadm) {
+      const mdstat = readFile('/proc/mdstat') || '';
+      const lines = mdstat.split('\n');
+      for (const line of lines) {
+        if (line.includes(diskName)) {
+          const arrayMatch = line.match(/^(md\d+)/);
+          if (arrayMatch) {
+            console.log(`[Storage] Stopping array /dev/${arrayMatch[1]} (contains ${diskPath})`);
+            execSync(`mdadm --stop /dev/${arrayMatch[1]} 2>/dev/null || true`, { timeout: 10000 });
+          }
+        }
+      }
+      
+      // 3. Clear RAID superblocks from all partitions
+      for (const part of diskInfo.partitions) {
+        execSync(`mdadm --zero-superblock ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+      }
+      execSync(`mdadm --zero-superblock ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
     }
-    execSync(`mdadm --zero-superblock ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
     
-    // 3. Remove all LVM
+    // 4. Remove all LVM
     for (const part of diskInfo.partitions) {
       execSync(`pvremove -f ${part.path} 2>/dev/null || true`, { timeout: 5000 });
     }
     
-    // 4. Wipe partition table
-    execSync(`sgdisk -Z ${diskPath}`, { timeout: 10000 });
+    // 5. Wipe filesystem signatures
+    execSync(`wipefs -a ${diskPath} 2>/dev/null || true`, { timeout: 10000 });
+    for (const part of diskInfo.partitions) {
+      execSync(`wipefs -a ${part.path} 2>/dev/null || true`, { timeout: 5000 });
+    }
+    
+    // 6. Wipe partition table
+    if (hasSgdisk) {
+      execSync(`sgdisk -Z ${diskPath}`, { timeout: 10000 });
+    } else {
+      // Fallback: dd the first and last MB to kill MBR/GPT
+      execSync(`dd if=/dev/zero of=${diskPath} bs=1M count=1 2>/dev/null || true`, { timeout: 10000 });
+      execSync(`dd if=/dev/zero of=${diskPath} bs=1M seek=$(( $(blockdev --getsize64 ${diskPath}) / 1048576 - 1 )) count=1 2>/dev/null || true`, { timeout: 10000 });
+    }
+    
     execSync(`partprobe ${diskPath} 2>/dev/null || true`, { timeout: 5000 });
     
-    // 5. Clear disk cache
+    // 7. Clear disk cache
     diskCache = null;
     
     console.log(`[Storage] Disk ${diskPath} wiped successfully`);
