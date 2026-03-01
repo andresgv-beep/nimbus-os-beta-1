@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@context';
 import styles from './SmbPanel.module.css';
 
 /* ─── Reusable Toggle ─── */
@@ -71,6 +72,7 @@ function ConfigField({ label, value, onChange, type = 'text', options, hint, mon
 
 /* ─── Main SMB Panel ─── */
 export default function SmbPanel() {
+  const { token } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
@@ -80,8 +82,11 @@ export default function SmbPanel() {
   const [confPreview, setConfPreview] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  const authHeaders = { 'Authorization': `Bearer ${token}` };
+  const authJsonHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
   const fetchStatus = useCallback(() => {
-    fetch('/api/smb/status')
+    fetch('/api/smb/status', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
         if (!d.error) {
@@ -91,7 +96,7 @@ export default function SmbPanel() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [localConfig]);
+  }, [token, localConfig]);
 
   useEffect(() => { fetchStatus(); }, []);
   // Auto-refresh every 10s for live clients
@@ -103,7 +108,7 @@ export default function SmbPanel() {
   const doAction = async (action) => {
     setActionPending(action);
     try {
-      await fetch(`/api/smb/${action}`, { method: 'POST' });
+      await fetch(`/api/smb/${action}`, { method: 'POST', headers: authHeaders });
       // Small delay to let systemctl settle
       setTimeout(() => {
         fetchStatus();
@@ -119,7 +124,7 @@ export default function SmbPanel() {
     try {
       await fetch('/api/smb/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authJsonHeaders,
         body: JSON.stringify(localConfig),
       });
       setConfigDirty(false);
@@ -134,10 +139,10 @@ export default function SmbPanel() {
       // Save config first, then apply + restart
       await fetch('/api/smb/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authJsonHeaders,
         body: JSON.stringify(localConfig),
       });
-      await fetch('/api/smb/restart', { method: 'POST' });
+      await fetch('/api/smb/restart', { method: 'POST', headers: authHeaders });
       setConfigDirty(false);
       setTimeout(() => {
         fetchStatus();
@@ -151,14 +156,14 @@ export default function SmbPanel() {
   const toggleShareSmb = async (shareName, enabled) => {
     await fetch(`/api/smb/share/${shareName}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authJsonHeaders,
       body: JSON.stringify({ enabled }),
     });
     fetchStatus();
   };
 
   const fetchPreview = async () => {
-    const r = await fetch('/api/smb/preview');
+    const r = await fetch('/api/smb/preview', { headers: authHeaders });
     const d = await r.json();
     setConfPreview(d.conf || 'Error loading preview');
   };
