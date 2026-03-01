@@ -42,6 +42,8 @@ function DockerInstallWizard({ onClose, onInstalled, token, users }) {
   
   // Config
   const [selectedPool, setSelectedPool] = useState('');
+  const [pathType, setPathType] = useState('pool');
+  const [customPath, setCustomPath] = useState('');
   const [permissions, setPermissions] = useState([]); // usernames with access
   
   // Fetch pools
