@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '@context';
 import { WifiIcon, GlobeIcon, ShieldIcon } from '@icons';
 import Icon from '@icons';
 import SmbPanel from './SmbPanel';
@@ -919,12 +920,50 @@ function Fail2banPage() {
 
 /* ─── Main Network Component ─── */
 export default function Network() {
+  const { token } = useAuth();
   const [active, setActive] = useState('ports');
   const [services, setServices] = useState({
-    smb: true, ftp: false, ssh: true, nfs: false, webdav: false,
+    smb: false, ftp: false, ssh: false, nfs: false, webdav: false,
   });
 
-  const toggleService = (key) => setServices(prev => ({ ...prev, [key]: !prev[key] }));
+  // Fetch real service status on mount
+  useEffect(() => {
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const checks = [
+      { key: 'smb', url: '/api/smb/status' },
+      { key: 'ssh', url: '/api/ssh/status' },
+      { key: 'ftp', url: '/api/ftp/status' },
+      { key: 'nfs', url: '/api/nfs/status' },
+      { key: 'webdav', url: '/api/webdav/status' },
+    ];
+    checks.forEach(({ key, url }) => {
+      fetch(url, { headers })
+        .then(r => r.json())
+        .then(d => {
+          if (!d.error) {
+            setServices(prev => ({ ...prev, [key]: !!d.running }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [token]);
+
+  // Re-check status when switching tabs (so dots update after toggle)
+  useEffect(() => {
+    const headers = { 'Authorization': `Bearer ${token}` };
+    const map = { smb: '/api/smb/status', ssh: '/api/ssh/status', ftp: '/api/ftp/status', nfs: '/api/nfs/status', webdav: '/api/webdav/status' };
+    if (map[active]) {
+      const timer = setTimeout(() => {
+        fetch(map[active], { headers })
+          .then(r => r.json())
+          .then(d => {
+            if (!d.error) setServices(prev => ({ ...prev, [active]: !!d.running }));
+          })
+          .catch(() => {});
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [active, token]);
 
   const renderPage = () => {
     switch (active) {
