@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { ServiceIcon } from '@icons/services';
+import { LockIcon, PlusIcon, PackageIcon, CheckCircleIcon, AlertTriangleIcon, XCircleIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
 
@@ -116,7 +118,7 @@ export default function CertsPanel() {
       {/* Header */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon} style={{ background: 'rgba(76,175,80,0.1)' }}>🔒</div>
+          <div className={styles.svcIcon}><ServiceIcon id="certs" size={22} /></div>
           <div>
             <h3 className={styles.title}>SSL Certificates</h3>
             <p className={styles.desc}>Manage TLS certificates for encrypted connections</p>
@@ -127,7 +129,7 @@ export default function CertsPanel() {
       {/* Not installed */}
       {!certbotInstalled && (
         <div className={styles.notInstalled}>
-          <div className={styles.notInstalledIcon}>📦</div>
+          <div className={styles.notInstalledIcon}><PackageIcon size={40} /></div>
           <div className={styles.notInstalledTitle}>Certbot not installed</div>
           <p className={styles.notInstalledDesc}>
             Install Certbot to manage Let's Encrypt certificates automatically.
@@ -161,8 +163,8 @@ export default function CertsPanel() {
             active={tab}
             onChange={setTab}
             tabs={[
-              { id: 'certs', label: 'Certificates', icon: '🔒' },
-              { id: 'request', label: 'Request New', icon: '➕' },
+              { id: 'certs', label: 'Certificates', icon: <LockIcon size={14} /> },
+              { id: 'request', label: 'Request New', icon: <PlusIcon size={14} /> },
             ]}
           />
 
@@ -171,7 +173,7 @@ export default function CertsPanel() {
             <div>
               {certs.length === 0 ? (
                 <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>🔒</div>
+                  <div className={styles.emptyIcon}><LockIcon size={32} /></div>
                   <div className={styles.emptyTitle}>No certificates found</div>
                   <p className={styles.emptyDesc}>
                     Request a Let's Encrypt certificate to enable HTTPS for your domains.
@@ -186,7 +188,7 @@ export default function CertsPanel() {
                       <div key={i} className={styles.itemRow}>
                         <div className={styles.itemMain}>
                           <div className={styles.itemIcon}>
-                            {isExpired ? '❌' : isExpiringSoon ? '⚠️' : '✅'}
+                            {isExpired ? <XCircleIcon size={20} style={{color:'var(--accent-red)'}} /> : isExpiringSoon ? <AlertTriangleIcon size={20} style={{color:'var(--accent-amber)'}} /> : <CheckCircleIcon size={20} style={{color:'var(--accent-green)'}} />}
                           </div>
                           <div className={styles.itemInfo}>
                             <div className={styles.itemName}>{cert.domain}</div>
@@ -226,7 +228,7 @@ export default function CertsPanel() {
 
               {/* Auto-renewal info */}
               <div className={styles.infoBar} style={{ marginTop: 16 }}>
-                💡 Let's Encrypt certificates auto-renew via systemd timer or cron. 
+                Let's Encrypt certificates auto-renew via systemd timer or cron. 
                 Run <span className={styles.mono}>sudo certbot renew --dry-run</span> to test renewal.
               </div>
             </div>
@@ -276,7 +278,7 @@ export default function CertsPanel() {
                     onClick={requestCert}
                     disabled={requesting || !newCert.domain || !newCert.email}
                   >
-                    {requesting ? 'Requesting…' : '🔒 Request Certificate'}
+                    {requesting ? 'Requesting…' : 'Request Certificate'}
                   </button>
                 </div>
               </div>
@@ -285,7 +287,7 @@ export default function CertsPanel() {
               {requestLog && (
                 <div className={styles.configCard}>
                   <div className={styles.configCardTitle}>
-                    {requestLog.ok ? '✅ Certificate Obtained' : '❌ Request Failed'}
+                    {requestLog.ok ? 'Certificate Obtained' : 'Request Failed'}
                   </div>
                   <pre className={styles.codeBlock}>
                     {requestLog.log || requestLog.error || JSON.stringify(requestLog, null, 2)}
@@ -295,7 +297,7 @@ export default function CertsPanel() {
 
               {/* Requirements */}
               <div className={styles.infoBar}>
-                ⚠️ Requirements: Your domain must point to this server's public IP. 
+                Requirements: Your domain must point to this server's public IP. 
                 For standalone mode, port 80 must be available. 
                 For DNS challenge, you'll need to create a TXT record manually.
               </div>

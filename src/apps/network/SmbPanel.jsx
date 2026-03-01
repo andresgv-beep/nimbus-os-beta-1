@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ServiceIcon } from '@icons/services';
+import { FolderOutlineIcon, MonitorIcon, UserIcon, SettingsIcon, FileCodeIcon, InfoIcon } from '@icons';
 import { useAuth } from '@context';
 import styles from './SmbPanel.module.css';
 
@@ -233,7 +235,7 @@ export default function SmbPanel() {
       {/* ── Header ── */}
       <div className={styles.header}>
         <div className={styles.headerLeft}>
-          <div className={styles.svcIcon}>📁</div>
+          <div className={styles.svcIcon}><ServiceIcon id="smb" size={22} /></div>
           <div>
             <h3 className={styles.title}>SMB / CIFS</h3>
             <p className={styles.desc}>
@@ -304,11 +306,11 @@ export default function SmbPanel() {
             active={tab}
             onChange={setTab}
             tabs={[
-              { id: 'overview', label: 'Shares', icon: '📂' },
-              { id: 'clients', label: 'Clients', icon: '🖥' },
-              { id: 'users', label: 'Users', icon: '👤' },
-              { id: 'config', label: 'Config', icon: '⚙️' },
-              { id: 'conf', label: 'smb.conf', icon: '📄' },
+              { id: 'overview', label: 'Shares', icon: <FolderOutlineIcon size={14} /> },
+              { id: 'clients', label: 'Clients', icon: <MonitorIcon size={14} /> },
+              { id: 'users', label: 'Users', icon: <UserIcon size={14} /> },
+              { id: 'config', label: 'Config', icon: <SettingsIcon size={14} /> },
+              { id: 'conf', label: 'smb.conf', icon: <FileCodeIcon size={14} /> },
             ]}
           />
 
@@ -317,7 +319,7 @@ export default function SmbPanel() {
             <div className={styles.sharesSection}>
               {(data?.shares || []).length === 0 ? (
                 <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>📁</div>
+                  <div className={styles.emptyIcon}><FolderOutlineIcon size={32} /></div>
                   <div className={styles.emptyTitle}>No shared folders</div>
                   <p className={styles.emptyDesc}>
                     Create shared folders in Storage Manager, then enable them for SMB here.
@@ -328,7 +330,7 @@ export default function SmbPanel() {
                   {(data?.shares || []).map(share => (
                     <div key={share.name} className={`${styles.shareRow} ${!share.smbEnabled ? styles.shareDisabled : ''}`}>
                       <div className={styles.shareMain}>
-                        <div className={styles.shareIcon}>{share.smbEnabled ? '📂' : '📁'}</div>
+                        <div className={styles.shareIcon}><FolderOutlineIcon size={20} /></div>
                         <div className={styles.shareInfo}>
                           <div className={styles.shareName}>{share.displayName || share.name}</div>
                           <div className={styles.sharePath}>{share.path}</div>
@@ -395,7 +397,7 @@ export default function SmbPanel() {
             <div>
               {(data?.clients || []).length === 0 ? (
                 <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>🖥</div>
+                  <div className={styles.emptyIcon}><MonitorIcon size={32} /></div>
                   <div className={styles.emptyTitle}>No active connections</div>
                   <p className={styles.emptyDesc}>
                     {isRunning
@@ -519,7 +521,7 @@ export default function SmbPanel() {
               </div>
 
               <div className={styles.infoBar}>
-                💡 When creating new users in Control Panel, their Linux account and SMB password 
+                When creating new users in Control Panel, their Linux account and SMB password 
                 are now set automatically. This page is for existing users created before this feature.
               </div>
             </div>
@@ -627,7 +629,7 @@ export default function SmbPanel() {
                 <pre className={styles.confCode}>{confPreview}</pre>
               ) : (
                 <div className={styles.emptyState}>
-                  <div className={styles.emptyIcon}>📄</div>
+                  <div className={styles.emptyIcon}><FileCodeIcon size={32} /></div>
                   <div className={styles.emptyTitle}>Preview not loaded</div>
                   <p className={styles.emptyDesc}>
                     Click "Load Preview" to see the generated smb.conf based on current shares and configuration.
