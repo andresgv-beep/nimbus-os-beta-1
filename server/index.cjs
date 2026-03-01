@@ -2215,9 +2215,14 @@ function saveSmbConfig(config) {
 }
 
 function getSmbStatus() {
-  // Separate installed check from running check
-  // detectNativeApp uses 'systemctl is-active smbd' which throws on exit code 3 (inactive)
-  const installed = !!run('which smbd 2>/dev/null');
+  // smbd lives in /usr/sbin which may not be in Node's PATH
+  // Use multiple detection methods
+  const installed = !!(
+    run('which smbd 2>/dev/null') ||
+    run('test -x /usr/sbin/smbd && echo yes') ||
+    run('dpkg -l samba 2>/dev/null | grep -q "^ii" && echo yes') ||
+    run('systemctl list-unit-files smbd.service 2>/dev/null | grep -q smbd && echo yes')
+  );
   const running = run('systemctl is-active smbd 2>/dev/null') === 'active';
   
   // Try to get connected clients
