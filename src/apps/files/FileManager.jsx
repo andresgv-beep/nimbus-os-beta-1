@@ -62,6 +62,14 @@ export default function FileManager() {
 
   useEffect(() => { fetchShares(); }, [fetchShares]);
 
+  // Refresh shares periodically and on window focus
+  useEffect(() => {
+    const interval = setInterval(fetchShares, 30000);
+    const onFocus = () => fetchShares();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(interval); window.removeEventListener('focus', onFocus); };
+  }, [fetchShares]);
+
   // Fetch files when share or path changes
   const fetchFiles = useCallback(async () => {
     if (!currentShare) { setFiles([]); return; }
