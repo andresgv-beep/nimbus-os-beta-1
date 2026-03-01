@@ -2562,6 +2562,207 @@ function handlePortal(url, method, body, req) {
   return null;
 }
 
+// ═══════════════════════════════════
+// Reverse Proxy (Nginx) API
+// ═══════════════════════════════════
+const PROXY_CONFIG_FILE = path.join(CONFIG_DIR, 'proxy-rules.json');
+const NGINX_SITES = '/etc/nginx/sites-available';
+const NGINX_ENABLED = '/etc/nginx/sites-enabled';
+
+function getProxyRules() {
+  try { if (fs.existsSync(PROXY_CONFIG_FILE)) return JSON.parse(fs.readFileSync(PROXY_CONFIG_FILE, 'utf-8')); } catch {}
+  return [];
+}
+function saveProxyRules(rules) { fs.writeFileSync(PROXY_CONFIG_FILE, JSON.stringify(rules, null, 2)); }
+
+function generateNginxProxyConf(rule) {
+  const upstreamName = rule.domain.replace(/[^a-z0-9]/g, '_');
+  let conf = '';
+  
+  if (rule.ssl && rule.certPath) {
+    // HTTPS server block
+    conf += `server {\n`;
+    conf += `    listen 443 ssl http2;\n`;
+    conf += `    listen [::]:443 ssl http2;\n`;
+    conf += `    server_name ${rule.domain};\n\n`;
+    conf += `    ssl_certificate ${rule.certPath};\n`;
+    conf += `    ssl_certificate_key ${rule.keyPath};\n`;
+    conf += `    ssl_protocols TLSv1.2 TLSv1.3;\n`;
+    conf += `    ssl_ciphers HIGH:!aNULL:!MD5;\n\n`;
+    conf += `    location / {\n`;
+    conf += `        proxy_pass http://${rule.target};\n`;
+    conf += `        proxy_set_header Host $host;\n`;
+    conf += `        proxy_set_header X-Real-IP $remote_addr;\n`;
+    conf += `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n`;
+    conf += `        proxy_set_header X-Forwarded-Proto $scheme;\n`;
+    conf += `        proxy_http_version 1.1;\n`;
+    conf += `        proxy_set_header Upgrade $http_upgrade;\n`;
+    conf += `        proxy_set_header Connection "upgrade";\n`;
+    conf += `        proxy_buffering off;\n`;
+    conf += `        proxy_request_buffering off;\n`;
+    conf += `    }\n`;
+    conf += `}\n\n`;
+    // HTTP → HTTPS redirect
+    conf += `server {\n`;
+    conf += `    listen 80;\n    listen [::]:80;\n`;
+    conf += `    server_name ${rule.domain};\n`;
+    conf += `    return 301 https://$server_name$request_uri;\n`;
+    conf += `}\n`;
+  } else {
+    // HTTP only
+    conf += `server {\n`;
+    conf += `    listen 80;\n    listen [::]:80;\n`;
+    conf += `    server_name ${rule.domain};\n\n`;
+    conf += `    location / {\n`;
+    conf += `        proxy_pass http://${rule.target};\n`;
+    conf += `        proxy_set_header Host $host;\n`;
+    conf += `        proxy_set_header X-Real-IP $remote_addr;\n`;
+    conf += `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n`;
+    conf += `        proxy_set_header X-Forwarded-Proto $scheme;\n`;
+    conf += `        proxy_http_version 1.1;\n`;
+    conf += `        proxy_set_header Upgrade $http_upgrade;\n`;
+    conf += `        proxy_set_header Connection "upgrade";\n`;
+    conf += `    }\n`;
+    conf += `}\n`;
+  }
+  return conf;
+}
+
+function applyProxyRules(rules) {
+  // Remove old nimbusos proxy rule files
+  const existing = run(`ls ${NGINX_SITES}/nimbusos-proxy-*.conf 2>/dev/null`) || '';
+  for (const f of existing.split('\n').filter(Boolean)) {
+    const base = path.basename(f);
+    fs.unlinkSync(f);
+    try { fs.unlinkSync(path.join(NGINX_ENABLED, base)); } catch {}
+  }
+  
+  // Generate new configs
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    const filename = `nimbusos-proxy-${rule.domain.replace(/[^a-z0-9.-]/g, '_')}.conf`;
+    const conf = generateNginxProxyConf(rule);
+    fs.writeFileSync(path.join(NGINX_SITES, filename), conf);
+    run(`ln -sf ${path.join(NGINX_SITES, filename)} ${NGINX_ENABLED}/${filename}`);
+  }
+  
+  // Test and reload
+  const test = run('sudo nginx -t 2>&1');
+  if (test && test.includes('failed')) {
+    return { ok: false, error: 'Nginx config test failed', detail: test };
+  }
+  run('sudo systemctl reload nginx 2>/dev/null');
+  return { ok: true };
+}
+
+function handleProxy(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/proxy/status' && method === 'GET') {
+    const installed = !!(run('which nginx 2>/dev/null') || run('test -x /usr/sbin/nginx && echo yes'));
+    const running = run('systemctl is-active nginx 2>/dev/null') === 'active';
+    const version = run('nginx -v 2>&1') || null;
+    const rules = getProxyRules();
+    return { installed, running, version, rules };
+  }
+
+  // POST /api/proxy/rules — save all rules
+  if (url === '/api/proxy/rules' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { rules } = body;
+    if (!Array.isArray(rules)) return { error: 'rules array required' };
+    saveProxyRules(rules);
+    const result = applyProxyRules(rules);
+    return result;
+  }
+
+  // POST /api/proxy/add — add a single rule
+  if (url === '/api/proxy/add' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain, target, ssl } = body;
+    if (!domain || !target) return { error: 'Domain and target required' };
+    
+    const rules = getProxyRules();
+    if (rules.find(r => r.domain === domain)) return { error: 'Domain already exists' };
+    
+    const rule = { 
+      domain, target, ssl: !!ssl, enabled: true, 
+      created: new Date().toISOString(),
+      certPath: '', keyPath: '',
+    };
+    
+    // Try to get cert if SSL enabled
+    if (ssl) {
+      const certDir = `/etc/letsencrypt/live/${domain}`;
+      if (fs.existsSync(certDir)) {
+        rule.certPath = `${certDir}/fullchain.pem`;
+        rule.keyPath = `${certDir}/privkey.pem`;
+      }
+    }
+    
+    rules.push(rule);
+    saveProxyRules(rules);
+    const result = applyProxyRules(rules);
+    return { ...result, rule };
+  }
+
+  // POST /api/proxy/delete — remove a rule
+  if (url === '/api/proxy/delete' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain } = body;
+    let rules = getProxyRules();
+    rules = rules.filter(r => r.domain !== domain);
+    saveProxyRules(rules);
+    const result = applyProxyRules(rules);
+    return result;
+  }
+
+  // POST /api/proxy/toggle — enable/disable rule
+  if (url === '/api/proxy/toggle' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain } = body;
+    const rules = getProxyRules();
+    const rule = rules.find(r => r.domain === domain);
+    if (!rule) return { error: 'Rule not found' };
+    rule.enabled = !rule.enabled;
+    saveProxyRules(rules);
+    const result = applyProxyRules(rules);
+    return result;
+  }
+
+  // POST /api/proxy/ssl — request cert for a proxy rule
+  if (url === '/api/proxy/ssl' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain, email } = body;
+    if (!domain || !email) return { error: 'Domain and email required' };
+    
+    try {
+      const log = execSync(
+        `sudo certbot --nginx -d "${domain}" --non-interactive --agree-tos -m "${email}" --redirect 2>&1`,
+        { encoding: 'utf-8', timeout: 120000 }
+      );
+      
+      // Update rule with cert paths
+      const rules = getProxyRules();
+      const rule = rules.find(r => r.domain === domain);
+      if (rule) {
+        rule.ssl = true;
+        rule.certPath = `/etc/letsencrypt/live/${domain}/fullchain.pem`;
+        rule.keyPath = `/etc/letsencrypt/live/${domain}/privkey.pem`;
+        saveProxyRules(rules);
+        applyProxyRules(rules);
+      }
+      
+      return { ok: true, log };
+    } catch (err) {
+      return { error: 'SSL request failed', log: err.stderr || err.message };
+    }
+  }
+
+  return null;
+}
+
 function handleSsh(url, method, body, req) {
   const session = getSessionUser(req);
   if (!session) return { error: 'Not authenticated' };
@@ -5751,6 +5952,26 @@ const server = http.createServer((req, res) => {
       return;
     }
     const result = handlePortal(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── Reverse Proxy routes ──
+  if (url.startsWith('/api/proxy')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleProxy(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleProxy(url, method, {}, req);
     res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
     return res.end(JSON.stringify(result || { error: 'Not found' }));
   }
