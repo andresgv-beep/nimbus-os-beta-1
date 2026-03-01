@@ -440,6 +440,8 @@ function CertsPage() {
 
 /* ─── Firewall Page — scan-based service discovery ─── */
 function FirewallPage() {
+  const { token } = useAuth();
+  const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
   const [scan, setScan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -453,7 +455,7 @@ function FirewallPage() {
 
   const doScan = () => {
     setScanning(true);
-    fetch('/api/firewall/scan').then(r => r.json()).then(data => {
+    fetch('/api/firewall/scan', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(data => {
       setScan(data);
       setLoading(false);
       setScanning(false);
@@ -464,7 +466,7 @@ function FirewallPage() {
 
   const fetchUpnp = () => {
     setUpnpLoading(true);
-    fetch('/api/upnp/status').then(r => r.json()).then(data => {
+    fetch('/api/upnp/status', { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json()).then(data => {
       setUpnp(data);
       setUpnpLoading(false);
     }).catch(() => setUpnpLoading(false));
@@ -474,7 +476,7 @@ function FirewallPage() {
     if (!newMapping.externalPort) return;
     setSaving(true);
     fetch('/api/upnp/add', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify(newMapping),
     }).then(r => r.json()).then(data => {
       setSaving(false);
@@ -486,7 +488,7 @@ function FirewallPage() {
     if (!confirm(`Remove router mapping ${externalPort}/${protocol}?`)) return;
     setActionInProgress(`upnp:${externalPort}/${protocol}`);
     fetch('/api/upnp/remove', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify({ externalPort, protocol }),
     }).then(r => r.json()).then(() => { setActionInProgress(null); fetchUpnp(); })
       .catch(() => setActionInProgress(null));
@@ -497,11 +499,11 @@ function FirewallPage() {
     setActionInProgress(`${port}/${protocol}`);
     Promise.all([
       fetch('/api/firewall/add-rule', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: authHeaders,
         body: JSON.stringify({ port: String(port), protocol, source: '', action: 'allow' }),
       }),
       fetch('/api/upnp/add', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: authHeaders,
         body: JSON.stringify({ externalPort: port, internalPort: port, protocol: protocol.toUpperCase(), description: `NimbusOS:${port}` }),
       }),
     ]).then(() => { setActionInProgress(null); doScan(); fetchUpnp(); })
@@ -512,7 +514,7 @@ function FirewallPage() {
 
   const handleToggleFirewall = () => {
     fetch('/api/firewall/toggle', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify({ enable: !fw?.ufwActive }),
     }).then(r => r.json()).then(() => doScan());
   };
@@ -520,7 +522,7 @@ function FirewallPage() {
   const handleOpenPort = (port, protocol) => {
     setActionInProgress(`${port}/${protocol}`);
     fetch('/api/firewall/add-rule', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify({ port: String(port), protocol, source: '', action: 'allow' }),
     }).then(r => r.json()).then(() => { setActionInProgress(null); doScan(); })
       .catch(() => setActionInProgress(null));
@@ -540,7 +542,7 @@ function FirewallPage() {
         .catch(() => setActionInProgress(null));
     } else {
       fetch('/api/firewall/add-rule', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: authHeaders,
         body: JSON.stringify({ port: String(port), protocol, source: '', action: 'deny' }),
       }).then(r => r.json()).then(() => { setActionInProgress(null); doScan(); })
         .catch(() => setActionInProgress(null));
@@ -551,7 +553,7 @@ function FirewallPage() {
     if (!newRule.port) return;
     setSaving(true);
     fetch('/api/firewall/add-rule', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify(newRule),
     }).then(r => r.json()).then(data => {
       setSaving(false);
@@ -562,7 +564,7 @@ function FirewallPage() {
   const handleRemoveRule = (num) => {
     if (!confirm(`Remove rule #${num}?`)) return;
     fetch('/api/firewall/remove-rule', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: authHeaders,
       body: JSON.stringify({ ruleNum: num }),
     }).then(r => r.json()).then(() => doScan());
   };
