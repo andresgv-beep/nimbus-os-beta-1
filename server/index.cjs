@@ -2408,6 +2408,160 @@ function generateSmbConf(config, shares) {
 // ═══════════════════════════════════
 // SSH API
 // ═══════════════════════════════════
+// ═══════════════════════════════════
+// DDNS API
+// ═══════════════════════════════════
+const DDNS_CONFIG_FILE = path.join(CONFIG_DIR, 'ddns.json');
+const DDNS_LOG_FILE = path.join(CONFIG_DIR, 'ddns.log');
+
+function getDdnsConfig() {
+  try { if (fs.existsSync(DDNS_CONFIG_FILE)) return JSON.parse(fs.readFileSync(DDNS_CONFIG_FILE, 'utf-8')); } catch {}
+  return { enabled: false, provider: '', domain: '', token: '', username: '', interval: 5 };
+}
+function saveDdnsConfig(cfg) { fs.writeFileSync(DDNS_CONFIG_FILE, JSON.stringify(cfg, null, 2)); }
+
+function ddnsUpdate(cfg) {
+  let url = '';
+  const headers = {};
+  if (cfg.provider === 'duckdns') {
+    const subdomain = cfg.domain.replace('.duckdns.org', '');
+    url = `https://www.duckdns.org/update?domains=${subdomain}&token=${cfg.token}&ip=`;
+  } else if (cfg.provider === 'noip') {
+    url = `https://dynupdate.no-ip.com/nic/update?hostname=${cfg.domain}`;
+    headers['Authorization'] = 'Basic ' + Buffer.from(`${cfg.username}:${cfg.token}`).toString('base64');
+  } else if (cfg.provider === 'dynu') {
+    url = `https://api.dynu.com/nic/update?hostname=${cfg.domain}&password=${cfg.token}`;
+  } else if (cfg.provider === 'cloudflare') {
+    // Cloudflare needs zone + record IDs, simplified: just log
+    return { ok: false, error: 'Cloudflare requires zone/record setup — use API token in CLI' };
+  } else if (cfg.provider === 'freedns') {
+    url = `https://freedns.afraid.org/dynamic/update.php?${cfg.token}`;
+  } else {
+    return { ok: false, error: 'Unknown provider' };
+  }
+
+  try {
+    const curlCmd = headers.Authorization
+      ? `curl -fsSL -H "Authorization: ${headers.Authorization}" "${url}" 2>&1`
+      : `curl -fsSL "${url}" 2>&1`;
+    const result = execSync(curlCmd, { encoding: 'utf-8', timeout: 15000 });
+    const logEntry = `[${new Date().toISOString()}] ${cfg.provider}: ${result.trim()}\n`;
+    fs.appendFileSync(DDNS_LOG_FILE, logEntry);
+    return { ok: true, response: result.trim() };
+  } catch (err) {
+    const logEntry = `[${new Date().toISOString()}] ${cfg.provider}: ERROR ${err.message}\n`;
+    fs.appendFileSync(DDNS_LOG_FILE, logEntry);
+    return { ok: false, error: err.message };
+  }
+}
+
+function setupDdnsCron(cfg) {
+  // Remove existing nimbusos ddns cron
+  run('crontab -l 2>/dev/null | grep -v "nimbusos-ddns" | crontab - 2>/dev/null');
+  if (!cfg.enabled) return;
+  // Write update script
+  const script = `#!/bin/bash\n# nimbusos-ddns\nnode -e "require('${path.join(INSTALL_DIR, 'server', 'index.cjs')}').ddnsUpdate && process.exit()" 2>/dev/null || curl -fsSL "${cfg.provider === 'duckdns' ? `https://www.duckdns.org/update?domains=${cfg.domain.replace('.duckdns.org','')}&token=${cfg.token}&ip=` : ''}" > /dev/null 2>&1\n`;
+  const scriptPath = path.join(CONFIG_DIR, 'ddns-update.sh');
+  fs.writeFileSync(scriptPath, script);
+  run(`chmod +x "${scriptPath}"`);
+  // Add cron
+  const cronLine = `*/${cfg.interval} * * * * ${scriptPath} # nimbusos-ddns`;
+  run(`(crontab -l 2>/dev/null; echo "${cronLine}") | crontab - 2>/dev/null`);
+}
+
+function handleDdns(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/ddns/status' && method === 'GET') {
+    const config = getDdnsConfig();
+    const externalIp = run('curl -fsSL https://api.ipify.org 2>/dev/null') || run('curl -fsSL https://ifconfig.me 2>/dev/null') || '—';
+    let lastLog = '';
+    try {
+      if (fs.existsSync(DDNS_LOG_FILE)) {
+        const lines = fs.readFileSync(DDNS_LOG_FILE, 'utf-8').trim().split('\n');
+        lastLog = lines[lines.length - 1] || '';
+      }
+    } catch {}
+    return { config, externalIp: externalIp.trim(), lastLog };
+  }
+
+  if (url === '/api/ddns/config' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    saveDdnsConfig(body);
+    setupDdnsCron(body);
+    return { ok: true };
+  }
+
+  if (url === '/api/ddns/test' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const cfg = body.provider ? body : getDdnsConfig();
+    return ddnsUpdate(cfg);
+  }
+
+  if (url === '/api/ddns/logs' && method === 'GET') {
+    try {
+      if (fs.existsSync(DDNS_LOG_FILE)) {
+        const log = fs.readFileSync(DDNS_LOG_FILE, 'utf-8');
+        return { log };
+      }
+    } catch {}
+    return { log: '' };
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// Web Portal (port config) API
+// ═══════════════════════════════════
+function handlePortal(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/portal/status' && method === 'GET') {
+    const currentPort = PORT;
+    const httpsEnabled = !!process.env.NIMBUS_HTTPS;
+    const httpsPort = process.env.NIMBUS_HTTPS_PORT || '5001';
+    return { httpPort: currentPort, httpsEnabled, httpsPort };
+  }
+
+  if (url === '/api/portal/config' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { httpPort, httpsPort } = body;
+    
+    // Validate ports
+    const hp = parseInt(httpPort);
+    const hsp = parseInt(httpsPort);
+    if (hp && (hp < 1 || hp > 65535)) return { error: 'Invalid HTTP port' };
+    if (hsp && (hsp < 1 || hsp > 65535)) return { error: 'Invalid HTTPS port' };
+    
+    // Update env file
+    const envFile = '/etc/nimbusos/nimbusos.env';
+    if (fs.existsSync(envFile)) {
+      let env = fs.readFileSync(envFile, 'utf-8');
+      if (hp) env = env.replace(/NIMBUS_PORT=\d+/, `NIMBUS_PORT=${hp}`);
+      if (hsp) {
+        if (env.includes('NIMBUS_HTTPS_PORT=')) {
+          env = env.replace(/NIMBUS_HTTPS_PORT=\d+/, `NIMBUS_HTTPS_PORT=${hsp}`);
+        } else {
+          env += `\nNIMBUS_HTTPS_PORT=${hsp}\n`;
+        }
+      }
+      fs.writeFileSync(envFile, env);
+    }
+    
+    // Update systemd and firewall
+    if (hp && hp !== PORT) {
+      run(`sudo ufw allow ${hp}/tcp comment 'NimbusOS Web UI' 2>/dev/null`);
+    }
+    
+    return { ok: true, needsRestart: true, message: `Port will change to ${hp || PORT} after restart. Run: sudo systemctl restart nimbusos` };
+  }
+
+  return null;
+}
+
 function handleSsh(url, method, body, req) {
   const session = getSessionUser(req);
   if (!session) return { error: 'Not authenticated' };
@@ -5559,6 +5713,46 @@ const server = http.createServer((req, res) => {
     const statusCode = result.error ? (result.code === 'NO_PERMISSION' ? 403 : 400) : 200;
     res.writeHead(statusCode, CORS_HEADERS);
     return res.end(JSON.stringify(result));
+  }
+
+  // ── DDNS routes ──
+  if (url.startsWith('/api/ddns')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleDdns(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleDdns(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── Portal config routes ──
+  if (url.startsWith('/api/portal')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handlePortal(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handlePortal(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
   }
 
   // ── SSH routes ──
