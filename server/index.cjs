@@ -435,6 +435,44 @@ function isValidPort(port) {
 // ═══════════════════════════════════
 // Auth API handlers
 // ═══════════════════════════════════
+// ═══════════════════════════════════
+// Linux / Samba user sync
+// ═══════════════════════════════════
+function ensureLinuxUser(username) {
+  // Check if user already exists in Linux
+  const exists = run(`id "${username}" 2>/dev/null`);
+  if (!exists) {
+    // Create system user: no home, no login shell, in 'nimbus' group for shared access
+    run(`sudo useradd -M -s /usr/sbin/nologin -G nimbus "${username}" 2>/dev/null`);
+    // If nimbus group doesn't exist, create without group
+    if (!run(`id "${username}" 2>/dev/null`)) {
+      run(`sudo useradd -M -s /usr/sbin/nologin "${username}" 2>/dev/null`);
+    }
+  }
+}
+
+function ensureSmbUser(username, password) {
+  ensureLinuxUser(username);
+  // Set samba password (pipe it to smbpasswd)
+  try {
+    execSync(`(echo "${password}"; echo "${password}") | sudo smbpasswd -s -a "${username}" 2>/dev/null`, 
+      { encoding: 'utf-8', timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeLinuxSmbUser(username) {
+  // Remove from samba
+  run(`sudo smbpasswd -x "${username}" 2>/dev/null`);
+  // Remove linux user (only if it was created by NimbusOS — check nologin shell)
+  const shell = run(`getent passwd "${username}" 2>/dev/null | cut -d: -f7`);
+  if (shell && shell.includes('nologin')) {
+    run(`sudo userdel "${username}" 2>/dev/null`);
+  }
+}
+
 function handleAuth(url, method, body, req) {
 
   // GET /api/auth/status — is setup done?
@@ -457,6 +495,9 @@ function handleAuth(url, method, body, req) {
       description: 'System administrator',
     }];
     saveUsers(users);
+
+    // Sync: create Linux user + Samba password
+    ensureSmbUser(users[0].username, password);
 
     // Create default volume directory
     const volDir = path.join(NIMBUS_ROOT, 'volumes', 'volume1');
@@ -725,6 +766,9 @@ function handleAuth(url, method, body, req) {
     });
     saveUsers(users);
 
+    // Sync: create Linux user + Samba password
+    ensureSmbUser(username.toLowerCase().trim(), password);
+
     return { ok: true, username: username.toLowerCase().trim() };
   }
 
@@ -742,6 +786,10 @@ function handleAuth(url, method, body, req) {
     if (users.length === before) return { error: 'User not found' };
 
     saveUsers(users);
+
+    // Sync: remove Linux/Samba user
+    removeLinuxSmbUser(target);
+
     return { ok: true };
   }
 
@@ -757,6 +805,8 @@ function handleAuth(url, method, body, req) {
 
     if (body.password && body.password.length >= 4) {
       user.password = hashPassword(body.password);
+      // Sync: update Samba password
+      ensureSmbUser(target, body.password);
     }
     if (body.role) user.role = body.role;
     if (body.description !== undefined) user.description = body.description;
@@ -830,6 +880,9 @@ function handleShares(url, method, body, req) {
     if (!fs.existsSync(folderPath)) {
       fs.mkdirSync(folderPath, { recursive: true });
     }
+    // Set ownership so SMB users can access — owner=creator, group=nimbus, mode=2775 (setgid)
+    run(`sudo chown ${session.username}:nimbus "${folderPath}" 2>/dev/null`);
+    run(`sudo chmod 2775 "${folderPath}" 2>/dev/null`);
 
     // Default: admin has rw
     const permissions = {};
@@ -2487,6 +2540,44 @@ function handleSmb(url, method, body, req) {
     share.smb = body.enabled !== false;
     saveShares(shares);
     return { ok: true, name, smbEnabled: share.smb };
+  }
+
+  // POST /api/smb/sync-users — sync all NimbusOS users to Linux/Samba (admin only)
+  if (url === '/api/smb/sync-users' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const users = getUsers();
+    const results = [];
+    for (const user of users) {
+      ensureLinuxUser(user.username);
+      // We can't recover plaintext passwords, so just ensure Linux user exists
+      // Samba password must be set separately if user was created before this feature
+      const linuxExists = !!run(`id "${user.username}" 2>/dev/null`);
+      const smbExists = !!run(`sudo pdbedit -L 2>/dev/null | grep -q "^${user.username}:" && echo yes`);
+      results.push({ 
+        username: user.username, 
+        linuxUser: linuxExists, 
+        sambaUser: smbExists,
+      });
+    }
+    // Also fix ownership on all share directories
+    const shares = getShares();
+    for (const share of shares) {
+      if (fs.existsSync(share.path)) {
+        run(`sudo chmod 2775 "${share.path}" 2>/dev/null`);
+        // Add nimbus group
+        run(`sudo chgrp nimbus "${share.path}" 2>/dev/null`);
+      }
+    }
+    return { ok: true, users: results };
+  }
+
+  // POST /api/smb/set-password — set Samba password for a user (admin only)
+  if (url === '/api/smb/set-password' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { username, password } = body;
+    if (!username || !password) return { error: 'Username and password required' };
+    const ok = ensureSmbUser(username, password);
+    return ok ? { ok: true } : { error: 'Failed to set SMB password' };
   }
 
   return null;
