@@ -2405,6 +2405,511 @@ function generateSmbConf(config, shares) {
   return lines.join('\n');
 }
 
+// ═══════════════════════════════════
+// SSH API
+// ═══════════════════════════════════
+function handleSsh(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/ssh/status' && method === 'GET') {
+    const running = run('systemctl is-active sshd 2>/dev/null || systemctl is-active ssh 2>/dev/null') === 'active';
+    const version = run('ssh -V 2>&1 | head -1') || null;
+
+    // Parse sshd_config
+    const config = {};
+    const conf = readFile('/etc/ssh/sshd_config');
+    if (conf) {
+      const get = (key) => {
+        const m = conf.match(new RegExp(`^\\s*${key}\\s+(.+)`, 'mi'));
+        return m ? m[1].trim() : null;
+      };
+      config.port = get('Port') || '22';
+      config.rootLogin = get('PermitRootLogin') || 'prohibit-password';
+      config.passwordAuth = get('PasswordAuthentication') || 'yes';
+      config.pubkeyAuth = get('PubkeyAuthentication') || 'yes';
+      config.maxAuthTries = get('MaxAuthTries') || '6';
+      config.x11Forwarding = get('X11Forwarding') || 'no';
+    }
+
+    // Active sessions
+    let connectedUsers = [];
+    const who = run('who 2>/dev/null');
+    if (who) {
+      connectedUsers = who.split('\n').filter(Boolean).map(line => {
+        const parts = line.trim().split(/\s+/);
+        return { user: parts[0], tty: parts[1], login: parts[2] + ' ' + (parts[3] || ''), from: (parts[4] || '').replace(/[()]/g, '') };
+      });
+    }
+
+    return { running, version, config, connectedUsers, activeSessions: connectedUsers.length };
+  }
+
+  if (url === '/api/ssh/start' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl start sshd 2>/dev/null || sudo systemctl start ssh 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  if (url === '/api/ssh/stop' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl stop sshd 2>/dev/null || sudo systemctl stop ssh 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// FTP API
+// ═══════════════════════════════════
+function handleFtp(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/ftp/status' && method === 'GET') {
+    const installed = !!(run('which vsftpd 2>/dev/null') || run('test -x /usr/sbin/vsftpd && echo yes') || run('which proftpd 2>/dev/null'));
+    const running = run('systemctl is-active vsftpd 2>/dev/null') === 'active' || run('systemctl is-active proftpd 2>/dev/null') === 'active';
+    const sftpAvailable = run('systemctl is-active sshd 2>/dev/null || systemctl is-active ssh 2>/dev/null') === 'active';
+    const version = run('vsftpd -v 2>&1 | head -1') || run('proftpd -v 2>&1 | head -1') || null;
+
+    // Parse vsftpd.conf
+    const config = {};
+    const conf = readFile('/etc/vsftpd.conf') || readFile('/etc/vsftpd/vsftpd.conf');
+    if (conf) {
+      const get = (key) => {
+        const m = conf.match(new RegExp(`^\\s*${key}\\s*=\\s*(.+)`, 'mi'));
+        return m ? m[1].trim() : null;
+      };
+      config.port = get('listen_port') || '21';
+      config.anonymousEnable = get('anonymous_enable') || 'NO';
+      config.localEnable = get('local_enable') || 'YES';
+      config.writeEnable = get('write_enable') || 'NO';
+      config.chrootLocalUser = get('chroot_local_user') || 'NO';
+      config.sslEnable = get('ssl_enable') || 'NO';
+      config.pasvMinPort = get('pasv_min_port') || '';
+      config.pasvMaxPort = get('pasv_max_port') || '';
+    }
+
+    return { installed, running, sftpAvailable, version, config };
+  }
+
+  if (url === '/api/ftp/start' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl start vsftpd 2>/dev/null || sudo systemctl start proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  if (url === '/api/ftp/stop' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl stop vsftpd 2>/dev/null || sudo systemctl stop proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// NFS API
+// ═══════════════════════════════════
+function handleNfs(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/nfs/status' && method === 'GET') {
+    const installed = !!(
+      run('which nfsd 2>/dev/null') ||
+      run('test -x /usr/sbin/rpc.nfsd && echo yes') ||
+      run('dpkg -l nfs-kernel-server 2>/dev/null | grep -q "^ii" && echo yes') ||
+      run('systemctl list-unit-files nfs-server.service 2>/dev/null | grep -q nfs && echo yes')
+    );
+    const running = run('systemctl is-active nfs-server 2>/dev/null') === 'active' || run('systemctl is-active nfs-kernel-server 2>/dev/null') === 'active';
+    const version = run('cat /proc/fs/nfsd/versions 2>/dev/null') || null;
+
+    // Parse /etc/exports
+    let exports = [];
+    const exportsFile = readFile('/etc/exports');
+    if (exportsFile) {
+      exports = exportsFile.split('\n')
+        .filter(l => l.trim() && !l.trim().startsWith('#'))
+        .map(line => {
+          const parts = line.trim().split(/\s+/);
+          const path = parts[0];
+          const rest = parts.slice(1).join(' ');
+          // Extract clients and options: "192.168.1.0/24(rw,sync)"
+          const clientMatch = rest.match(/^([^\(]+)/);
+          const optMatch = rest.match(/\(([^)]+)\)/);
+          return {
+            path,
+            clients: clientMatch ? clientMatch[1].trim() : '*',
+            options: optMatch ? optMatch[1] : 'defaults',
+          };
+        });
+    }
+
+    // Active clients
+    let activeClients = [];
+    const showmount = run('showmount --no-headers 2>/dev/null');
+    if (showmount) {
+      activeClients = showmount.split('\n').filter(Boolean).map(line => {
+        const parts = line.trim().split(/\s+/);
+        return { client: parts[0] || '?', export: parts[1] || '?' };
+      });
+    }
+
+    return { installed, running, version, exports, activeClients };
+  }
+
+  if (url === '/api/nfs/start' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl start nfs-server 2>/dev/null || sudo systemctl start nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  if (url === '/api/nfs/stop' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl stop nfs-server 2>/dev/null || sudo systemctl stop nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
+      return { ok: true };
+    } catch (err) { return { error: 'Failed', detail: err.message }; }
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// DNS API
+// ═══════════════════════════════════
+function getDnsStatus() {
+  const result = { servers: [], search: [], method: 'unknown' };
+  
+  // Try systemd-resolved first
+  const resolved = run('resolvectl status 2>/dev/null');
+  if (resolved) {
+    result.method = 'systemd-resolved';
+    const dnsLines = resolved.match(/DNS Servers?:\s*(.+)/g) || [];
+    for (const line of dnsLines) {
+      const ips = line.replace(/DNS Servers?:\s*/, '').trim().split(/\s+/);
+      result.servers.push(...ips.filter(ip => ip.match(/^\d/)));
+    }
+    const searchMatch = resolved.match(/DNS Domain:\s*(.+)/);
+    if (searchMatch) result.search = searchMatch[1].trim().split(/\s+/);
+  }
+  
+  // Fallback: /etc/resolv.conf
+  if (result.servers.length === 0) {
+    const resolv = readFile('/etc/resolv.conf');
+    if (resolv) {
+      result.method = 'resolv.conf';
+      const nameservers = resolv.match(/^nameserver\s+(\S+)/gm) || [];
+      result.servers = nameservers.map(l => l.replace('nameserver ', '').trim());
+      const searchLine = resolv.match(/^search\s+(.+)/m);
+      if (searchLine) result.search = searchLine[1].trim().split(/\s+/);
+    }
+  }
+  
+  // Deduplicate
+  result.servers = [...new Set(result.servers)];
+  return result;
+}
+
+function handleDns(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/dns/status' && method === 'GET') {
+    return getDnsStatus();
+  }
+
+  if (url === '/api/dns/config' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { servers, search } = body;
+    if (!servers || !Array.isArray(servers)) return { error: 'servers array required' };
+
+    // Try systemd-resolved first
+    const useResolved = !!run('which resolvectl 2>/dev/null');
+    if (useResolved) {
+      // Get default interface
+      const iface = run("ip route | grep default | awk '{print $5}' | head -1") || 'eth0';
+      const dnsCmd = `sudo resolvectl dns ${iface} ${servers.join(' ')} 2>/dev/null`;
+      run(dnsCmd);
+      if (search && search.length > 0) {
+        run(`sudo resolvectl domain ${iface} ${search.join(' ')} 2>/dev/null`);
+      }
+    }
+    
+    // Also write resolv.conf as fallback
+    const lines = ['# Generated by NimbusOS'];
+    if (search && search.length > 0) lines.push(`search ${search.join(' ')}`);
+    for (const s of servers) lines.push(`nameserver ${s}`);
+    
+    try {
+      fs.writeFileSync('/tmp/nimbus-resolv.conf', lines.join('\n') + '\n');
+      run('sudo cp /tmp/nimbus-resolv.conf /etc/resolv.conf 2>/dev/null');
+    } catch {}
+    
+    return { ok: true };
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// Certificates / Let's Encrypt API
+// ═══════════════════════════════════
+function handleCerts(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/certs/status' && method === 'GET') {
+    const certbotInstalled = !!(
+      run('which certbot 2>/dev/null') ||
+      run('test -x /usr/bin/certbot && echo yes') ||
+      run('snap list certbot 2>/dev/null | grep certbot && echo yes')
+    );
+    
+    const certificates = [];
+    if (certbotInstalled) {
+      const raw = run('sudo certbot certificates 2>/dev/null');
+      if (raw) {
+        // Parse certbot output
+        const blocks = raw.split(/Certificate Name:/);
+        for (const block of blocks.slice(1)) {
+          const nameMatch = block.match(/^\s*(\S+)/);
+          const domainMatch = block.match(/Domains?:\s*(.+)/);
+          const expiryMatch = block.match(/Expiry Date:\s*(\S+ \S+ \S+)/);
+          const pathMatch = block.match(/Certificate Path:\s*(\S+)/);
+          
+          if (nameMatch) {
+            const expiry = expiryMatch ? expiryMatch[1] : 'unknown';
+            let daysLeft = -1;
+            if (expiryMatch) {
+              try {
+                const expDate = new Date(expiryMatch[1]);
+                daysLeft = Math.floor((expDate - Date.now()) / 86400000);
+              } catch {}
+            }
+            
+            certificates.push({
+              name: nameMatch[1].trim(),
+              domain: domainMatch ? domainMatch[1].trim() : nameMatch[1].trim(),
+              expiry,
+              daysLeft,
+              valid: daysLeft > 0,
+              path: pathMatch ? pathMatch[1].trim() : '',
+              issuer: "Let's Encrypt",
+            });
+          }
+        }
+      }
+    }
+    
+    // Also check for self-signed certs
+    const selfSigned = run('ls /etc/ssl/certs/nimbus* 2>/dev/null');
+    if (selfSigned) {
+      for (const certPath of selfSigned.split('\n').filter(Boolean)) {
+        const info = run(`openssl x509 -in "${certPath}" -noout -subject -enddate 2>/dev/null`);
+        if (info) {
+          const subMatch = info.match(/CN\s*=\s*(\S+)/);
+          const endMatch = info.match(/notAfter=(.+)/);
+          let daysLeft = -1;
+          if (endMatch) {
+            try { daysLeft = Math.floor((new Date(endMatch[1]) - Date.now()) / 86400000); } catch {}
+          }
+          certificates.push({
+            name: subMatch ? subMatch[1] : 'Self-signed',
+            domain: subMatch ? subMatch[1] : path.basename(certPath),
+            expiry: endMatch ? endMatch[1].trim() : 'unknown',
+            daysLeft,
+            valid: daysLeft > 0,
+            path: certPath,
+            issuer: 'Self-signed',
+          });
+        }
+      }
+    }
+
+    return { certbotInstalled, certificates };
+  }
+
+  // POST /api/certs/request — request new Let's Encrypt cert
+  if (url === '/api/certs/request' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain, email, method: certMethod } = body;
+    if (!domain || !email) return { error: 'Domain and email required' };
+    
+    let cmd = `sudo certbot certonly --non-interactive --agree-tos -m "${email}"`;
+    if (certMethod === 'standalone') {
+      cmd += ` --standalone -d "${domain}"`;
+    } else if (certMethod === 'webroot') {
+      cmd += ` --webroot -w /var/www/html -d "${domain}"`;
+    } else if (certMethod === 'dns') {
+      cmd += ` --manual --preferred-challenges dns -d "${domain}"`;
+    }
+    
+    try {
+      const log = execSync(cmd + ' 2>&1', { encoding: 'utf-8', timeout: 120000 });
+      return { ok: true, log };
+    } catch (err) {
+      return { error: 'Certificate request failed', log: err.stderr || err.stdout || err.message };
+    }
+  }
+
+  // POST /api/certs/renew — renew specific cert
+  if (url === '/api/certs/renew' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain } = body;
+    try {
+      const log = execSync(`sudo certbot renew --cert-name "${domain}" --force-renewal 2>&1`,
+        { encoding: 'utf-8', timeout: 120000 });
+      return { ok: true, log };
+    } catch (err) {
+      return { error: 'Renewal failed', log: err.stderr || err.message };
+    }
+  }
+
+  // POST /api/certs/delete — delete cert
+  if (url === '/api/certs/delete' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const { domain } = body;
+    try {
+      run(`sudo certbot delete --cert-name "${domain}" --non-interactive 2>/dev/null`);
+      return { ok: true };
+    } catch {
+      return { error: 'Delete failed' };
+    }
+  }
+
+  return null;
+}
+
+// ═══════════════════════════════════
+// WebDAV API
+// ═══════════════════════════════════
+const WEBDAV_CONFIG_FILE = path.join(CONFIG_DIR, 'webdav.json');
+
+function getWebdavConfig() {
+  try {
+    if (fs.existsSync(WEBDAV_CONFIG_FILE)) {
+      return JSON.parse(fs.readFileSync(WEBDAV_CONFIG_FILE, 'utf-8'));
+    }
+  } catch {}
+  return {
+    httpPort: '80',
+    httpsPort: '443',
+    maxUploadMB: 10240,
+    requireAuth: true,
+  };
+}
+
+function saveWebdavConfig(config) {
+  fs.writeFileSync(WEBDAV_CONFIG_FILE, JSON.stringify(config, null, 2));
+}
+
+function handleWebdav(url, method, body, req) {
+  const session = getSessionUser(req);
+  if (!session) return { error: 'Not authenticated' };
+
+  if (url === '/api/webdav/status' && method === 'GET') {
+    // Detect web server (apache or nginx)
+    const apacheInstalled = !!(run('which apache2 2>/dev/null') || run('test -x /usr/sbin/apache2 && echo yes'));
+    const nginxInstalled = !!(run('which nginx 2>/dev/null') || run('test -x /usr/sbin/nginx && echo yes'));
+    const installed = apacheInstalled || nginxInstalled;
+    
+    let running = false;
+    let version = null;
+    let server = null;
+    
+    if (apacheInstalled) {
+      running = run('systemctl is-active apache2 2>/dev/null') === 'active';
+      version = run('apache2 -v 2>/dev/null | head -1') || null;
+      server = 'Apache';
+    } else if (nginxInstalled) {
+      running = run('systemctl is-active nginx 2>/dev/null') === 'active';
+      version = run('nginx -v 2>&1 | head -1') || null;
+      server = 'Nginx';
+    }
+
+    const config = getWebdavConfig();
+    const shares = getShares();
+    const webdavShares = shares.map(s => ({
+      name: s.name,
+      displayName: s.displayName,
+      path: s.path,
+      pool: s.pool,
+      webdavEnabled: s.webdav === true,
+    }));
+
+    return { installed, running, version, server, config, shares: webdavShares };
+  }
+
+  if (url === '/api/webdav/config' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const current = getWebdavConfig();
+    const updated = { ...current, ...body };
+    saveWebdavConfig(updated);
+    return { ok: true, config: updated };
+  }
+
+  if (url === '/api/webdav/start' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl start apache2 2>/dev/null || sudo systemctl start nginx 2>/dev/null',
+        { encoding: 'utf-8', timeout: 15000 });
+      return { ok: true };
+    } catch (err) {
+      return { error: 'Failed to start', detail: err.message };
+    }
+  }
+
+  if (url === '/api/webdav/stop' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl stop apache2 2>/dev/null || sudo systemctl stop nginx 2>/dev/null',
+        { encoding: 'utf-8', timeout: 15000 });
+      return { ok: true };
+    } catch (err) {
+      return { error: 'Failed to stop', detail: err.message };
+    }
+  }
+
+  if (url === '/api/webdav/restart' && method === 'POST') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    try {
+      execSync('sudo systemctl restart apache2 2>/dev/null || sudo systemctl restart nginx 2>/dev/null',
+        { encoding: 'utf-8', timeout: 15000 });
+      return { ok: true };
+    } catch (err) {
+      return { error: 'Failed to restart', detail: err.message };
+    }
+  }
+
+  // PUT /api/webdav/share/:name — toggle WebDAV on a share
+  const shareToggle = url.match(/^\/api\/webdav\/share\/([a-zA-Z0-9_-]+)$/);
+  if (shareToggle && method === 'PUT') {
+    if (session.role !== 'admin') return { error: 'Admin required' };
+    const name = shareToggle[1];
+    const shares = getShares();
+    const share = shares.find(s => s.name === name);
+    if (!share) return { error: 'Share not found' };
+    share.webdav = body.enabled !== false;
+    saveShares(shares);
+    return { ok: true, name, webdavEnabled: share.webdav };
+  }
+
+  return null;
+}
+
 function handleSmb(url, method, body, req) {
   const session = getSessionUser(req);
   if (!session) return { error: 'Not authenticated' };
@@ -5054,6 +5559,138 @@ const server = http.createServer((req, res) => {
     const statusCode = result.error ? (result.code === 'NO_PERMISSION' ? 403 : 400) : 200;
     res.writeHead(statusCode, CORS_HEADERS);
     return res.end(JSON.stringify(result));
+  }
+
+  // ── SSH routes ──
+  if (url.startsWith('/api/ssh')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleSsh(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleSsh(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── FTP routes ──
+  if (url.startsWith('/api/ftp')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleFtp(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleFtp(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── NFS routes ──
+  if (url.startsWith('/api/nfs')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleNfs(url, method, parsed, req);
+          res.writeHead(!result ? 404 : result.error ? 400 : 200, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) { res.writeHead(500, CORS_HEADERS); res.end(JSON.stringify({ error: err.message })); }
+      });
+      return;
+    }
+    const result = handleNfs(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── DNS routes ──
+  if (url.startsWith('/api/dns')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleDns(url, method, parsed, req);
+          const statusCode = !result ? 404 : result.error ? 400 : 200;
+          res.writeHead(statusCode, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) {
+          res.writeHead(500, CORS_HEADERS);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+    const result = handleDns(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── Certs routes ──
+  if (url.startsWith('/api/certs')) {
+    if (method === 'POST') {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleCerts(url, method, parsed, req);
+          const statusCode = !result ? 404 : result.error ? 400 : 200;
+          res.writeHead(statusCode, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) {
+          res.writeHead(500, CORS_HEADERS);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+    const result = handleCerts(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
+  }
+
+  // ── WebDAV routes ──
+  if (url.startsWith('/api/webdav')) {
+    if (['POST', 'PUT'].includes(method)) {
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', () => {
+        try {
+          const parsed = body ? JSON.parse(body) : {};
+          const result = handleWebdav(url, method, parsed, req);
+          const statusCode = !result ? 404 : result.error ? 400 : 200;
+          res.writeHead(statusCode, CORS_HEADERS);
+          res.end(JSON.stringify(result || { error: 'Not found' }));
+        } catch (err) {
+          res.writeHead(500, CORS_HEADERS);
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+    const result = handleWebdav(url, method, {}, req);
+    res.writeHead(result?.error ? 400 : 200, CORS_HEADERS);
+    return res.end(JSON.stringify(result || { error: 'Not found' }));
   }
 
   // ── SMB routes ──
