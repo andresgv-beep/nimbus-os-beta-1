@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@context';
-import { ShieldIcon, HardDriveIcon, WifiIcon, UserIcon, UsersIcon, KeyIcon, HistoryIcon, BellIcon, CalendarIcon } from '@icons';
+import PortalPage from './PortalPage';
+import { ShieldIcon, HardDriveIcon, WifiIcon, UserIcon, UsersIcon, KeyIcon, HistoryIcon, BellIcon, CalendarIcon, GlobeIcon } from '@icons';
 import Icon from '@icons';
 import styles from './ControlPanel.module.css';
 
@@ -10,6 +11,7 @@ const SIDEBAR = [
   { id: 'users', label: 'User Accounts', icon: UserIcon, section: 'Users' },
   { id: 'folders', label: 'Shared Folders', icon: HardDriveIcon, section: 'Permissions' },
   { id: 'appperm', label: 'App Permissions', icon: ShieldIcon },
+  { id: 'portal', label: 'Web Portal', icon: GlobeIcon, section: 'Network' },
   { id: 'login', label: 'Login Settings', icon: KeyIcon, section: 'Security' },
   { id: 'sessions', label: 'Active Sessions', icon: WifiIcon },
   { id: 'history', label: 'Login History', icon: HistoryIcon },
@@ -922,6 +924,7 @@ export default function ControlPanel() {
       case 'users': return <UsersPage />;
       case 'folders': return <SharedFoldersPage />;
       case 'appperm': return <AppPermissionsPage />;
+      case 'portal': return <PortalPage />;
       case 'login': return <PlaceholderPage title="Login Settings" />;
       case 'sessions': return <PlaceholderPage title="Active Sessions" />;
       case 'history': return <PlaceholderPage title="Login History" />;
