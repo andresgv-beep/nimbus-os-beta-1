@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 import { WifiIcon, GlobeIcon, ShieldIcon } from '@icons';
 import Icon from '@icons';
 import SmbPanel from './SmbPanel';
+import DnsPanel from './DnsPanel';
+import CertsPanel from './CertsPanel';
+import WebDavPanel from './WebDavPanel';
+import SshPanel from './SshPanel';
+import FtpPanel from './FtpPanel';
+import NfsPanel from './NfsPanel';
 import styles from './Network.module.css';
 
 /* ─── Sidebar config ─── */
@@ -923,85 +929,18 @@ export default function Network() {
   const renderPage = () => {
     switch (active) {
       case 'ifaces': return <InterfacesPage />;
-      case 'dns': return <DNSPage />;
+      case 'dns': return <DnsPanel />;
       case 'ports': return <PortsPage />;
       case 'ddns': return <DDNSPage />;
       case 'proxy': return <ProxyPage />;
-      case 'certs': return <CertsPage />;
+      case 'certs': return <CertsPanel />;
       case 'firewall': return <FirewallPage />;
       case 'fail2ban': return <Fail2banPage />;
       case 'smb': return <SmbPanel />;
-      case 'ftp': return (
-        <ServicePage
-          title="FTP / SFTP"
-          description="Transfer files via FTP (insecure) or SFTP (secure, recommended)"
-          enabled={services.ftp}
-          onToggle={() => toggleService('ftp')}
-          port="21 / 22"
-          protocol="TCP"
-          fields={[
-            { label: 'FTP (port 21)', value: 'Disabled' },
-            { label: 'SFTP (port 22)', value: 'Enabled via SSH' },
-            { label: 'Passive ports', value: '55000–55999' },
-            { label: 'Anonymous access', value: 'Disabled' },
-            { label: 'Bandwidth limit', value: 'Unlimited' },
-            { label: 'Root directory', value: '/volume1' },
-          ]}
-        />
-      );
-      case 'ssh': return (
-        <ServicePage
-          title="SSH"
-          description="Secure shell access to the server via terminal"
-          enabled={services.ssh}
-          onToggle={() => toggleService('ssh')}
-          port="22"
-          protocol="TCP"
-          fields={[
-            { label: 'Port', value: '22' },
-            { label: 'Root login', value: 'Disabled' },
-            { label: 'Password auth', value: 'Enabled' },
-            { label: 'Key auth', value: 'Enabled' },
-            { label: 'Max sessions', value: '10' },
-            { label: 'Idle timeout', value: '15 min' },
-            { label: 'Allowed users', value: 'admin' },
-          ]}
-        />
-      );
-      case 'nfs': return (
-        <ServicePage
-          title="NFS"
-          description="Network File System for Linux/Unix clients"
-          enabled={services.nfs}
-          onToggle={() => toggleService('nfs')}
-          port="2049"
-          protocol="TCP/UDP"
-          fields={[
-            { label: 'NFS version', value: 'NFSv4' },
-            { label: 'Kerberos', value: 'Disabled' },
-          ]}
-          shares={[
-            { name: 'Media', path: '/volume1/media', access: '192.168.1.0/24', status: 'Exported' },
-            { name: 'Backups', path: '/volume1/backups', access: '192.168.1.0/24', status: 'Exported' },
-          ]}
-        />
-      );
-      case 'webdav': return (
-        <ServicePage
-          title="WebDAV"
-          description="Access files via HTTP/HTTPS with WebDAV protocol"
-          enabled={services.webdav}
-          onToggle={() => toggleService('webdav')}
-          port="5005 / 5006"
-          protocol="HTTP / HTTPS"
-          fields={[
-            { label: 'HTTP port', value: '5005' },
-            { label: 'HTTPS port', value: '5006' },
-            { label: 'Max upload size', value: '10 GB' },
-            { label: 'Log access', value: 'Enabled' },
-          ]}
-        />
-      );
+      case 'ftp': return <FtpPanel />;
+      case 'ssh': return <SshPanel />;
+      case 'nfs': return <NfsPanel />;
+      case 'webdav': return <WebDavPanel />;
       default: return null;
     }
   };
