@@ -389,6 +389,75 @@ function hashPassword(password) {
   return `${salt}:${hash}`;
 }
 
+// ═══════════════════════════════════
+// TOTP (2FA) — compatible with Google Authenticator
+// ═══════════════════════════════════
+function generateTotpSecret() {
+  // Generate 20 random bytes, encode as base32
+  const bytes = crypto.randomBytes(20);
+  return base32Encode(bytes);
+}
+
+function base32Encode(buffer) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, value = 0, result = '';
+  for (const byte of buffer) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      result += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) result += alphabet[(value << (5 - bits)) & 31];
+  return result;
+}
+
+function base32Decode(str) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0, value = 0;
+  const output = [];
+  for (const c of str.toUpperCase().replace(/=+$/, '')) {
+    const idx = alphabet.indexOf(c);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      output.push((value >>> (bits - 8)) & 0xFF);
+      bits -= 8;
+    }
+  }
+  return Buffer.from(output);
+}
+
+function generateTotp(secret, time) {
+  const t = Math.floor((time || Date.now() / 1000) / 30);
+  const timeBuffer = Buffer.alloc(8);
+  timeBuffer.writeUInt32BE(0, 0);
+  timeBuffer.writeUInt32BE(t, 4);
+  const key = base32Decode(secret);
+  const hmac = crypto.createHmac('sha1', key).update(timeBuffer).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const code = ((hmac[offset] & 0x7f) << 24 | hmac[offset + 1] << 16 | hmac[offset + 2] << 8 | hmac[offset + 3]) % 1000000;
+  return code.toString().padStart(6, '0');
+}
+
+function verifyTotp(secret, token) {
+  // Check current and ±1 time step (30 second window each side)
+  const now = Date.now() / 1000;
+  for (let i = -1; i <= 1; i++) {
+    if (generateTotp(secret, now + i * 30) === token) return true;
+  }
+  return false;
+}
+
+function getTotpQrUrl(username, secret) {
+  const issuer = 'NimbusOS';
+  const uri = `otpauth://totp/${issuer}:${username}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`;
+  // Return a URL to Google Charts QR API (works offline too if user has the URI)
+  return { uri, qrUrl: `https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl=${encodeURIComponent(uri)}` };
+}
+
 function verifyPassword(password, stored) {
   const [salt, hash] = stored.split(':');
   const test = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -526,7 +595,7 @@ function handleAuth(url, method, body, req) {
 
   // POST /api/auth/login
   if (url === '/api/auth/login' && method === 'POST') {
-    const { username, password } = body;
+    const { username, password, totpCode } = body;
     if (!username || !password) return { error: 'Username and password required' };
 
     const users = getUsers();
@@ -535,11 +604,126 @@ function handleAuth(url, method, body, req) {
       return { error: 'Invalid credentials' };
     }
 
+    // Check 2FA if enabled
+    if (user.totpSecret && user.totpEnabled) {
+      if (!totpCode) {
+        return { requires2FA: true, message: 'Two-factor authentication code required' };
+      }
+      if (!verifyTotp(user.totpSecret, totpCode)) {
+        return { error: 'Invalid 2FA code' };
+      }
+    }
+
     const token = generateToken();
     SESSIONS[token] = { username: user.username, role: user.role, created: Date.now() };
     saveSessions();
 
     return { ok: true, token, user: { username: user.username, role: user.role } };
+  }
+
+  // POST /api/auth/change-password
+  if (url === '/api/auth/change-password' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const { currentPassword, newPassword, targetUser } = body;
+    if (!newPassword || newPassword.length < 4) return { error: 'Password must be at least 4 characters' };
+    
+    const users = getUsers();
+    const editUser = targetUser && session.role === 'admin'
+      ? users.find(u => u.username === targetUser)
+      : users.find(u => u.username === session.username);
+    
+    if (!editUser) return { error: 'User not found' };
+    
+    // Non-admin users must provide current password
+    if (!targetUser || targetUser === session.username) {
+      if (!currentPassword || !verifyPassword(currentPassword, editUser.password)) {
+        return { error: 'Current password is incorrect' };
+      }
+    }
+    
+    editUser.password = hashPassword(newPassword);
+    saveUsers(users);
+    
+    // Also update Linux/Samba password
+    ensureSmbUser(editUser.username, newPassword);
+    
+    return { ok: true };
+  }
+
+  // POST /api/auth/2fa/setup — generate TOTP secret and QR
+  if (url === '/api/auth/2fa/setup' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const users = getUsers();
+    const user = users.find(u => u.username === session.username);
+    if (!user) return { error: 'User not found' };
+    
+    // Generate new secret (not yet enabled)
+    const secret = generateTotpSecret();
+    user.totpSecret = secret;
+    user.totpEnabled = false;
+    saveUsers(users);
+    
+    const { uri, qrUrl } = getTotpQrUrl(user.username, secret);
+    return { ok: true, secret, uri, qrUrl };
+  }
+
+  // POST /api/auth/2fa/verify — verify TOTP code and enable 2FA
+  if (url === '/api/auth/2fa/verify' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const { code } = body;
+    if (!code) return { error: 'Code required' };
+    
+    const users = getUsers();
+    const user = users.find(u => u.username === session.username);
+    if (!user || !user.totpSecret) return { error: 'No 2FA setup in progress' };
+    
+    if (!verifyTotp(user.totpSecret, code)) {
+      return { error: 'Invalid code. Make sure your authenticator app is synced.' };
+    }
+    
+    user.totpEnabled = true;
+    saveUsers(users);
+    
+    return { ok: true, message: '2FA enabled successfully' };
+  }
+
+  // POST /api/auth/2fa/disable — disable 2FA
+  if (url === '/api/auth/2fa/disable' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const { password } = body;
+    if (!password) return { error: 'Password required to disable 2FA' };
+    
+    const users = getUsers();
+    const user = users.find(u => u.username === session.username);
+    if (!user) return { error: 'User not found' };
+    
+    if (!verifyPassword(password, user.password)) {
+      return { error: 'Invalid password' };
+    }
+    
+    user.totpSecret = null;
+    user.totpEnabled = false;
+    saveUsers(users);
+    
+    return { ok: true };
+  }
+
+  // GET /api/auth/2fa/status — check if 2FA is enabled
+  if (url === '/api/auth/2fa/status' && method === 'GET') {
+    const session = getSessionUser(req);
+    if (!session) return { error: 'Not authenticated' };
+    
+    const users = getUsers();
+    const user = users.find(u => u.username === session.username);
+    return { enabled: !!(user?.totpEnabled) };
   }
 
   // POST /api/auth/logout
