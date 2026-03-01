@@ -103,7 +103,8 @@ install_deps() {
     samba \
     vsftpd \
     apache2 \
-    certbot \
+    nginx \
+    certbot python3-certbot-nginx \
     ufw \
     avahi-daemon
 
@@ -471,11 +472,58 @@ EOF
 
   a2ensite nimbusos-webdav 2>/dev/null || true
   
+  # Make sure Apache doesn't listen on 80/443 (Nginx handles those)
+  sed -i 's/^Listen 80/#Listen 80/' /etc/apache2/ports.conf 2>/dev/null || true
+  sed -i 's/^Listen 443/#Listen 443/' /etc/apache2/ports.conf 2>/dev/null || true
+  
   # Don't start Apache yet — user enables it from NimbusOS UI
   systemctl enable apache2 2>/dev/null || true
   systemctl stop apache2 2>/dev/null || true
 
   ok "WebDAV configured (port 5005, stopped until enabled from UI)"
+}
+
+# ── Configure Nginx (Reverse Proxy) ──
+setup_nginx() {
+  step "Configuring Nginx (Reverse Proxy)"
+
+  # Remove default site
+  rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+
+  # Create NimbusOS proxy base config
+  cat > /etc/nginx/sites-available/nimbusos-proxy.conf << 'EOF'
+# NimbusOS Reverse Proxy — managed by NimbusOS
+# Individual proxy rules are in /etc/nginx/sites-available/nimbusos-proxy-*.conf
+
+# Default server — shows NimbusOS if no proxy rule matches
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    # Redirect to NimbusOS
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+  ln -sf /etc/nginx/sites-available/nimbusos-proxy.conf /etc/nginx/sites-enabled/ 2>/dev/null
+
+  # Increase max upload size
+  echo 'client_max_body_size 10G;' > /etc/nginx/conf.d/nimbusos.conf
+
+  # Test and start
+  nginx -t 2>/dev/null && systemctl enable nginx && systemctl restart nginx
+  
+  ok "Nginx configured (port 80 → NimbusOS, ready for proxy rules)"
 }
 
 # ── Configure Avahi (mDNS/Bonjour) ──
@@ -594,6 +642,7 @@ main() {
   setup_samba
   setup_ftp
   setup_webdav
+  setup_nginx
   setup_avahi
   start_nimbusos
   print_summary
