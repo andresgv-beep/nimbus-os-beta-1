@@ -121,6 +121,7 @@ install_deps() {
   apt-get install -y -qq ntfs-3g 2>/dev/null || warn "ntfs-3g not available"
   apt-get install -y -qq exfat-fuse 2>/dev/null || warn "exfat-fuse not available"
   apt-get install -y -qq exfat-utils 2>/dev/null || apt-get install -y -qq exfatprogs 2>/dev/null || warn "exfat utils not available"
+  apt-get install -y -qq qrencode 2>/dev/null || warn "qrencode not available (2FA QR codes)"
 
   # Verify critical tools
   local missing=""
