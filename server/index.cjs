@@ -1546,19 +1546,56 @@ function handleDocker(url, method, body, req) {
     };
   }
   
-  // DELETE /api/docker/uninstall — uninstall Docker (admin only)
-  if (url === '/api/docker/uninstall' && method === 'DELETE') {
+  // POST /api/docker/uninstall — fully uninstall Docker (admin only)
+  if (url === '/api/docker/uninstall' && method === 'POST') {
     if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
     
-    // Just reset config, don't actually uninstall Docker
+    try {
+      // 1. Stop all containers
+      run('docker stop $(docker ps -aq) 2>/dev/null || true');
+      run('docker rm $(docker ps -aq) 2>/dev/null || true');
+      
+      // 2. Stop Docker
+      run('systemctl stop docker 2>/dev/null || true');
+      run('systemctl stop docker.socket 2>/dev/null || true');
+      run('systemctl disable docker 2>/dev/null || true');
+      
+      // 3. Remove Docker packages
+      execSync('apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>/dev/null || true', { timeout: 60000, stdio: 'pipe' });
+      execSync('apt-get autoremove -y 2>/dev/null || true', { timeout: 30000, stdio: 'pipe' });
+      
+      // 4. Remove daemon.json
+      run('rm -f /etc/docker/daemon.json 2>/dev/null || true');
+      
+      // 5. Reset NimbusOS docker config
+      const config = getDockerConfig();
+      config.installed = false;
+      config.dockerAvailable = false;
+      config.path = null;
+      config.permissions = [];
+      config.installedAt = null;
+      saveDockerConfig(config);
+      
+      // 6. Remove docker share
+      const shares = getShares().filter(s => s.name !== 'docker');
+      saveShares(shares);
+      
+      console.log('[Docker] Fully uninstalled');
+      return { ok: true };
+    } catch (err) {
+      return { error: 'Uninstall failed', detail: err.message };
+    }
+  }
+  
+  // DELETE /api/docker/uninstall — alias for backwards compat
+  if (url === '/api/docker/uninstall' && method === 'DELETE') {
+    if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
     const config = getDockerConfig();
     config.installed = false;
     config.path = null;
     config.permissions = [];
     config.installedAt = null;
-    config.containers = [];
     saveDockerConfig(config);
-    
     return { ok: true };
   }
   
