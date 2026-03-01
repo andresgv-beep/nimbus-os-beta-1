@@ -9,6 +9,7 @@ import WebDavPanel from './WebDavPanel';
 import SshPanel from './SshPanel';
 import FtpPanel from './FtpPanel';
 import NfsPanel from './NfsPanel';
+import ProxyPanel from './ProxyPanel';
 import styles from './Network.module.css';
 
 /* ─── Sidebar config ─── */
@@ -1014,7 +1015,7 @@ export default function Network() {
       case 'dns': return <DnsPanel />;
       case 'ports': return <PortsPage />;
       case 'ddns': return <DDNSPage />;
-      case 'proxy': return <ProxyPage />;
+      case 'proxy': return <ProxyPanel />;
       case 'certs': return <CertsPanel />;
       case 'firewall': return <FirewallPage />;
       case 'fail2ban': return <Fail2banPage />;
