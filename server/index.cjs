@@ -1415,26 +1415,33 @@ function handleDocker(url, method, body, req) {
     } catch { return { content: 'Waiting...', done: false, success: false }; }
   }
 
-  // POST /api/docker/install — configure Docker path (admin only)
-  // Docker comes pre-installed in NimbusOS, this just configures the data path
+  // POST /api/docker/install — install Docker and configure data path on a pool (admin only)
   if (url === '/api/docker/install' && method === 'POST') {
     if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
     
-    const { path: dockerPath, permissions } = body;
+    const { path: dockerPath, permissions, pool: poolName } = body;
     
-    // Determine full path — use pool if available
-    let fullPath;
+    // Require a pool
     const storageConf = getStorageConfig();
-    const primaryPool = (storageConf.pools || []).find(p => p.name === storageConf.primaryPool);
+    if (!storageConf.pools || storageConf.pools.length === 0) {
+      return { error: 'No storage pools available. Create a pool in Storage Manager first.' };
+    }
     
+    // Determine which pool to use
+    const targetPool = poolName
+      ? storageConf.pools.find(p => p.name === poolName)
+      : storageConf.pools.find(p => p.name === storageConf.primaryPool) || storageConf.pools[0];
+    
+    if (!targetPool) {
+      return { error: 'Selected pool not found.' };
+    }
+    
+    // Determine full path
+    let fullPath;
     if (dockerPath && dockerPath.startsWith('/')) {
-      // Explicit absolute path provided
       fullPath = dockerPath;
-    } else if (primaryPool) {
-      // Use primary pool's docker directory
-      fullPath = path.join(primaryPool.mountPoint, 'docker');
     } else {
-      return { error: 'No storage pool available. Create a pool in Storage Manager first.' };
+      fullPath = path.join(targetPool.mountPoint, 'docker');
     }
     
     const containersPath = path.join(fullPath, 'containers');
@@ -1459,8 +1466,47 @@ function handleDocker(url, method, body, req) {
       return { error: 'Error creando directorios', detail: err.message };
     }
     
-    // Check if Docker is available
-    const dockerAvailable = isDockerInstalled();
+    // Check if Docker is available — install if not
+    let dockerAvailable = isDockerInstalled();
+    
+    if (!dockerAvailable) {
+      try {
+        console.log('[Docker] Installing Docker engine...');
+        execSync('curl -fsSL https://get.docker.com | sh', { timeout: 300000, stdio: 'pipe' });
+        execSync(`usermod -aG docker ${session.username} 2>/dev/null || true`, { timeout: 5000 });
+        // Add nimbus user too
+        execSync('usermod -aG docker nimbus 2>/dev/null || true', { timeout: 5000 });
+        dockerAvailable = true;
+        console.log('[Docker] Engine installed successfully');
+      } catch (err) {
+        return { error: 'Docker installation failed', detail: err.stderr || err.message };
+      }
+    }
+    
+    // Configure Docker daemon to use pool as data-root
+    if (dockerAvailable) {
+      const daemonJsonPath = '/etc/docker/daemon.json';
+      let daemonConfig = {};
+      try {
+        if (fs.existsSync(daemonJsonPath)) {
+          daemonConfig = JSON.parse(fs.readFileSync(daemonJsonPath, 'utf-8'));
+        }
+      } catch {}
+      
+      const dockerDataPath = path.join(fullPath, 'data');
+      daemonConfig['data-root'] = dockerDataPath;
+      
+      try {
+        fs.mkdirSync('/etc/docker', { recursive: true });
+        fs.mkdirSync(dockerDataPath, { recursive: true });
+        fs.writeFileSync(daemonJsonPath, JSON.stringify(daemonConfig, null, 2));
+        execSync('systemctl enable docker', { timeout: 10000 });
+        execSync('systemctl restart docker', { timeout: 30000 });
+        console.log('[Docker] daemon.json configured with data-root:', dockerDataPath);
+      } catch (err) {
+        console.error('[Docker] Failed to configure daemon.json:', err.message);
+      }
+    }
     
     // Update config
     const config = getDockerConfig();
@@ -5843,15 +5889,14 @@ function createPool(name, disks, level, filesystem = 'ext4') {
     }
     saveStorageConfig(config);
     
-    // 5. If first pool, configure Docker path
+    // 5. If first pool, save as primary and create docker directory structure
     if (isFirstPool) {
-      const dockerConfig = getDockerConfig();
-      dockerConfig.installed = true;
-      dockerConfig.dockerAvailable = isDockerInstalled();
-      dockerConfig.path = `${mountPoint}/docker`;
-      dockerConfig.permissions = [];
-      dockerConfig.installedAt = new Date().toISOString();
-      saveDockerConfig(dockerConfig);
+      // Just prepare the directory structure — Docker will be installed from App Store
+      const dockerDir = `${mountPoint}/docker`;
+      const dirs2 = ['containers', 'stacks', 'volumes', 'data'];
+      for (const dir of dirs2) {
+        execSync(`mkdir -p ${dockerDir}/${dir}`);
+      }
       
       // Initial config backup
       backupConfigToPool(mountPoint);
