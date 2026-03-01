@@ -1,0 +1,15 @@
+src/icons/services/
+├── index.js
+├── smb.svg
+├── ftp.svg
+├── ssh.svg
+├── nfs.svg
+├── webdav.svg
+├── dns.svg
+├── ddns.svg
+├── certs.svg
+├── proxy.svg
+├── firewall.svg
+├── fail2ban.svg
+├── interfaces.svg
+└── ports.svg
