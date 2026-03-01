@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { WifiIcon, GlobeIcon, ShieldIcon } from '@icons';
 import Icon from '@icons';
+import SmbPanel from './SmbPanel';
 import styles from './Network.module.css';
 
 /* ─── Sidebar config ─── */
@@ -929,28 +930,7 @@ export default function Network() {
       case 'certs': return <CertsPage />;
       case 'firewall': return <FirewallPage />;
       case 'fail2ban': return <Fail2banPage />;
-      case 'smb': return (
-        <ServicePage
-          title="SMB / CIFS"
-          description="Share folders with Windows, macOS, and Linux devices on your local network"
-          enabled={services.smb}
-          onToggle={() => toggleService('smb')}
-          port="445"
-          protocol="TCP"
-          fields={[
-            { label: 'Workgroup', value: 'WORKGROUP' },
-            { label: 'Server string', value: 'NimbusOS NAS' },
-            { label: 'Min protocol', value: 'SMB2' },
-            { label: 'Max protocol', value: 'SMB3' },
-            { label: 'Guest access', value: 'Disabled' },
-          ]}
-          shares={[
-            { name: 'Public', path: '/volume1/public', access: 'Everyone (read)', status: 'Active' },
-            { name: 'Media', path: '/volume1/media', access: 'admin, media', status: 'Active' },
-            { name: 'Backups', path: '/volume1/backups', access: 'admin only', status: 'Active' },
-          ]}
-        />
-      );
+      case 'smb': return <SmbPanel />;
       case 'ftp': return (
         <ServicePage
           title="FTP / SFTP"
