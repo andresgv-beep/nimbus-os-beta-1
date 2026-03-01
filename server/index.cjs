@@ -2861,19 +2861,21 @@ function saveDdnsConfig(cfg) { fs.writeFileSync(DDNS_CONFIG_FILE, JSON.stringify
 function ddnsUpdate(cfg) {
   let url = '';
   const headers = {};
+  const token = (cfg.token || '').trim();
+  const domain = (cfg.domain || '').trim();
   if (cfg.provider === 'duckdns') {
-    const subdomain = cfg.domain.replace('.duckdns.org', '');
-    url = `https://www.duckdns.org/update?domains=${subdomain}&token=${cfg.token}&ip=`;
+    const subdomain = domain.replace('.duckdns.org', '');
+    url = `https://www.duckdns.org/update?domains=${subdomain}&token=${token}&ip=`;
   } else if (cfg.provider === 'noip') {
-    url = `https://dynupdate.no-ip.com/nic/update?hostname=${cfg.domain}`;
-    headers['Authorization'] = 'Basic ' + Buffer.from(`${cfg.username}:${cfg.token}`).toString('base64');
+    url = `https://dynupdate.no-ip.com/nic/update?hostname=${domain}`;
+    headers['Authorization'] = 'Basic ' + Buffer.from(`${(cfg.username||'').trim()}:${token}`).toString('base64');
   } else if (cfg.provider === 'dynu') {
-    url = `https://api.dynu.com/nic/update?hostname=${cfg.domain}&password=${cfg.token}`;
+    url = `https://api.dynu.com/nic/update?hostname=${domain}&password=${token}`;
   } else if (cfg.provider === 'cloudflare') {
     // Cloudflare needs zone + record IDs, simplified: just log
     return { ok: false, error: 'Cloudflare requires zone/record setup — use API token in CLI' };
   } else if (cfg.provider === 'freedns') {
-    url = `https://freedns.afraid.org/dynamic/update.php?${cfg.token}`;
+    url = `https://freedns.afraid.org/dynamic/update.php?${token}`;
   } else {
     return { ok: false, error: 'Unknown provider' };
   }
@@ -2898,7 +2900,7 @@ function setupDdnsCron(cfg) {
   run('crontab -l 2>/dev/null | grep -v "nimbusos-ddns" | crontab - 2>/dev/null');
   if (!cfg.enabled) return;
   // Write update script
-  const script = `#!/bin/bash\n# nimbusos-ddns\nnode -e "require('${path.join(INSTALL_DIR, 'server', 'index.cjs')}').ddnsUpdate && process.exit()" 2>/dev/null || curl -fsSL "${cfg.provider === 'duckdns' ? `https://www.duckdns.org/update?domains=${cfg.domain.replace('.duckdns.org','')}&token=${cfg.token}&ip=` : ''}" > /dev/null 2>&1\n`;
+  const script = `#!/bin/bash\n# nimbusos-ddns\nnode -e "require('${path.join(INSTALL_DIR, 'server', 'index.cjs')}').ddnsUpdate && process.exit()" 2>/dev/null || curl -fsSL "${cfg.provider === 'duckdns' ? `https://www.duckdns.org/update?domains=${(cfg.domain||'').trim().replace('.duckdns.org','')}&token=${(cfg.token||'').trim()}&ip=` : ''}" > /dev/null 2>&1\n`;
   const scriptPath = path.join(CONFIG_DIR, 'ddns-update.sh');
   fs.writeFileSync(scriptPath, script);
   run(`chmod +x "${scriptPath}"`);
