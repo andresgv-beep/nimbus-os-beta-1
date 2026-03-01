@@ -4930,6 +4930,36 @@ function getHardwareGpuInfo() {
       });
     });
   }
+  
+  // ARM/SBC fallback: detect GPU from device tree or kernel
+  if (result.gpus.length === 0) {
+    // Raspberry Pi VideoCore
+    const vcgencmd = run('vcgencmd get_mem gpu 2>/dev/null');
+    if (vcgencmd) {
+      const model = run('cat /proc/device-tree/model 2>/dev/null') || 'Raspberry Pi';
+      const gpuMem = vcgencmd.replace('gpu=', '').replace('M', ' MB').trim();
+      result.gpus.push({
+        description: `${model.trim()} — VideoCore (${gpuMem})`,
+        vendor: 'broadcom',
+        pciId: null,
+      });
+      result.currentDriver = 'v3d';
+    }
+    // Generic ARM GPU via /sys
+    if (result.gpus.length === 0) {
+      const gpuDevs = run('ls /sys/class/drm/card*/device/driver 2>/dev/null | head -1');
+      if (gpuDevs) {
+        const driverName = run('basename $(readlink /sys/class/drm/card0/device/driver) 2>/dev/null') || 'unknown';
+        const model = run('cat /proc/device-tree/model 2>/dev/null') || 'ARM Device';
+        result.gpus.push({
+          description: `${model.trim()} — ${driverName}`,
+          vendor: 'arm',
+          pciId: null,
+        });
+        result.currentDriver = driverName;
+      }
+    }
+  }
 
   // Current NVIDIA driver
   if (HAS_NVIDIA) {
