@@ -9,7 +9,7 @@ const { execSync, exec } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 
-const PORT = 5000;
+const PORT = 3100;
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -348,182 +348,6 @@ function getSystemSummary() {
 }
 
 // ═══════════════════════════════════
-// Samba (SMB)
-// ═══════════════════════════════════
-const SMB_CONF = '/etc/samba/smb.conf';
-
-function getSambaStatus() {
-  const smbd = run('systemctl is-active smbd 2>/dev/null') === 'active';
-  const nmbd = run('systemctl is-active nmbd 2>/dev/null') === 'active';
-  const version = run('smbd --version 2>/dev/null');
-  return {
-    running: smbd && nmbd,
-    smbd,
-    nmbd,
-    version: version ? version.replace('Version ', '') : null,
-  };
-}
-
-function parseSmbConf() {
-  const content = readFile(SMB_CONF);
-  if (!content) return { global: {}, shares: [] };
-
-  const lines = content.split('\n');
-  const global = {};
-  const shares = [];
-  let currentSection = null;
-  let currentData = {};
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    
-    // Skip comments and empty lines
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith(';')) continue;
-
-    // Section header [name]
-    const sectionMatch = trimmed.match(/^\[(.+)\]$/);
-    if (sectionMatch) {
-      // Save previous section
-      if (currentSection && currentSection !== 'global') {
-        shares.push({ name: currentSection, ...currentData });
-      }
-      currentSection = sectionMatch[1];
-      currentData = {};
-      continue;
-    }
-
-    // Key = value
-    const kvMatch = trimmed.match(/^([^=]+)=(.*)$/);
-    if (kvMatch && currentSection) {
-      const key = kvMatch[1].trim();
-      const value = kvMatch[2].trim();
-      if (currentSection === 'global') {
-        global[key] = value;
-      } else {
-        currentData[key] = value;
-      }
-    }
-  }
-
-  // Don't forget last section
-  if (currentSection && currentSection !== 'global') {
-    shares.push({ name: currentSection, ...currentData });
-  }
-
-  return { global, shares };
-}
-
-function getSambaConfig() {
-  const status = getSambaStatus();
-  const config = parseSmbConf();
-  return { ...status, ...config };
-}
-
-function getSambaShares() {
-  const { shares } = parseSmbConf();
-  return shares.map(share => ({
-    name: share.name,
-    path: share.path || '',
-    comment: share.comment || '',
-    browseable: share.browseable !== 'no',
-    readonly: share['read only'] !== 'no',
-    guestOk: share['guest ok'] === 'yes',
-    validUsers: share['valid users'] || '',
-    writelist: share['write list'] || '',
-  }));
-}
-
-function writeSmbConf(global, shares) {
-  let content = '[global]\n';
-  
-  for (const [key, value] of Object.entries(global)) {
-    content += `   ${key} = ${value}\n`;
-  }
-  
-  content += '\n# Shares managed by NimbusOS\n';
-  
-  for (const share of shares) {
-    content += `\n[${share.name}]\n`;
-    if (share.path) content += `   path = ${share.path}\n`;
-    if (share.comment) content += `   comment = ${share.comment}\n`;
-    content += `   browseable = ${share.browseable !== false ? 'yes' : 'no'}\n`;
-    content += `   read only = ${share.readonly !== false ? 'yes' : 'no'}\n`;
-    content += `   guest ok = ${share.guestOk === true ? 'yes' : 'no'}\n`;
-    if (share.validUsers) content += `   valid users = ${share.validUsers}\n`;
-    if (share.writelist) content += `   write list = ${share.writelist}\n`;
-    content += `   create mask = 0664\n`;
-    content += `   directory mask = 0775\n`;
-  }
-  
-  fs.writeFileSync(SMB_CONF, content);
-  run('systemctl restart smbd nmbd 2>/dev/null');
-  return { success: true };
-}
-
-function addSambaShare(shareData) {
-  const config = parseSmbConf();
-  
-  // Check if share already exists
-  if (config.shares.some(s => s.name === shareData.name)) {
-    return { error: 'Share already exists' };
-  }
-  
-  // Check if path exists, create if needed
-  if (shareData.path && !fs.existsSync(shareData.path)) {
-    try {
-      fs.mkdirSync(shareData.path, { recursive: true });
-      run(`chmod 775 "${shareData.path}"`);
-    } catch (e) {
-      return { error: `Cannot create directory: ${e.message}` };
-    }
-  }
-  
-  config.shares.push(shareData);
-  return writeSmbConf(config.global, config.shares);
-}
-
-function updateSambaShare(name, shareData) {
-  const config = parseSmbConf();
-  const idx = config.shares.findIndex(s => s.name === name);
-  
-  if (idx === -1) {
-    return { error: 'Share not found' };
-  }
-  
-  config.shares[idx] = { ...config.shares[idx], ...shareData };
-  return writeSmbConf(config.global, config.shares);
-}
-
-function deleteSambaShare(name) {
-  const config = parseSmbConf();
-  const idx = config.shares.findIndex(s => s.name === name);
-  
-  if (idx === -1) {
-    return { error: 'Share not found' };
-  }
-  
-  config.shares.splice(idx, 1);
-  return writeSmbConf(config.global, config.shares);
-}
-
-function updateSambaGlobal(settings) {
-  const config = parseSmbConf();
-  config.global = { ...config.global, ...settings };
-  return writeSmbConf(config.global, config.shares);
-}
-
-function toggleSamba(enable) {
-  if (enable) {
-    run('systemctl start smbd nmbd 2>/dev/null');
-    run('systemctl enable smbd nmbd 2>/dev/null');
-  } else {
-    run('systemctl stop smbd nmbd 2>/dev/null');
-    run('systemctl disable smbd nmbd 2>/dev/null');
-  }
-  return getSambaStatus();
-}
-
-// ═══════════════════════════════════
 // Docker (auto-detect socket)
 // ═══════════════════════════════════
 function getContainers() {
@@ -549,47 +373,9 @@ const routes = {
   '/api/uptime': () => ({ uptime: getUptime() }),
   '/api/containers': () => getContainers(),
   '/api/hostname': () => ({ hostname: os.hostname() }),
-  // Samba endpoints
-  '/api/smb/status': () => getSambaStatus(),
-  '/api/smb/config': () => getSambaConfig(),
-  '/api/smb/shares': () => getSambaShares(),
 };
 
-// POST routes for Samba management
-const postRoutes = {
-  '/api/smb/enable': () => toggleSamba(true),
-  '/api/smb/disable': () => toggleSamba(false),
-  '/api/smb/restart': () => {
-    run('systemctl restart smbd nmbd 2>/dev/null');
-    return getSambaStatus();
-  },
-};
-
-// POST routes that need body data
-const postRoutesWithBody = {
-  '/api/smb/shares/add': (body) => addSambaShare(body),
-  '/api/smb/shares/update': (body) => updateSambaShare(body.name, body),
-  '/api/smb/shares/delete': (body) => deleteSambaShare(body.name),
-  '/api/smb/global': (body) => updateSambaGlobal(body),
-};
-
-// Helper to parse JSON body
-function parseBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try {
-        resolve(body ? JSON.parse(body) : {});
-      } catch (e) {
-        reject(new Error('Invalid JSON'));
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
     res.writeHead(204, CORS_HEADERS);
@@ -597,70 +383,30 @@ const server = http.createServer(async (req, res) => {
   }
 
   const url = req.url.split('?')[0];
+  const handler = routes[url];
 
-  // GET requests
-  if (req.method === 'GET') {
-    const handler = routes[url];
-    if (handler) {
-      try {
-        const data = handler();
-        res.writeHead(200, CORS_HEADERS);
-        res.end(JSON.stringify(data));
-      } catch (err) {
-        res.writeHead(500, CORS_HEADERS);
-        res.end(JSON.stringify({ error: err.message }));
-      }
-      return;
+  if (handler) {
+    try {
+      const data = handler();
+      res.writeHead(200, CORS_HEADERS);
+      res.end(JSON.stringify(data));
+    } catch (err) {
+      res.writeHead(500, CORS_HEADERS);
+      res.end(JSON.stringify({ error: err.message }));
     }
+  } else {
+    res.writeHead(404, CORS_HEADERS);
+    res.end(JSON.stringify({ error: 'Not found' }));
   }
-
-  // POST requests
-  if (req.method === 'POST') {
-    // Simple POST (no body needed)
-    const simpleHandler = postRoutes[url];
-    if (simpleHandler) {
-      try {
-        const data = simpleHandler();
-        res.writeHead(200, CORS_HEADERS);
-        res.end(JSON.stringify(data));
-      } catch (err) {
-        res.writeHead(500, CORS_HEADERS);
-        res.end(JSON.stringify({ error: err.message }));
-      }
-      return;
-    }
-
-    // POST with body
-    const bodyHandler = postRoutesWithBody[url];
-    if (bodyHandler) {
-      try {
-        const body = await parseBody(req);
-        const data = bodyHandler(body);
-        res.writeHead(200, CORS_HEADERS);
-        res.end(JSON.stringify(data));
-      } catch (err) {
-        res.writeHead(500, CORS_HEADERS);
-        res.end(JSON.stringify({ error: err.message }));
-      }
-      return;
-    }
-  }
-
-  // 404
-  res.writeHead(404, CORS_HEADERS);
-  res.end(JSON.stringify({ error: 'Not found' }));
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  ╔══════════════════════════════════╗`);
-  console.log(`  ║   NimbusOS API Server v0.2.0     ║`);
+  console.log(`  ║   NimbusOS API Server v0.1.0     ║`);
   console.log(`  ║   http://0.0.0.0:${PORT}             ║`);
   console.log(`  ╚══════════════════════════════════╝\n`);
-  console.log(`  GET Endpoints:`);
-  Object.keys(routes).forEach(r => console.log(`    GET  ${r}`));
-  console.log(`  POST Endpoints:`);
-  Object.keys(postRoutes).forEach(r => console.log(`    POST ${r}`));
-  Object.keys(postRoutesWithBody).forEach(r => console.log(`    POST ${r}`));
+  console.log(`  Endpoints:`);
+  Object.keys(routes).forEach(r => console.log(`    GET ${r}`));
   console.log(`\n  Auto-detecting hardware...`);
 
   // Initial detection log
