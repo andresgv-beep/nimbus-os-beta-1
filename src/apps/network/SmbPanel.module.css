@@ -291,3 +291,17 @@
   color: var(--text-secondary); overflow-x: auto; white-space: pre;
   max-height: 480px; overflow-y: auto;
 }
+
+/* ── Badges ── */
+.badge {
+  font-size: var(--text-xs); padding: 2px 8px; border-radius: var(--radius-full);
+  color: var(--text-muted);
+}
+.badgeGood { background: rgba(76,175,80,0.08); color: var(--accent-green); }
+.badgeWarn { background: rgba(255,167,38,0.08); color: var(--accent-amber); }
+.badgeDanger { background: rgba(239,83,80,0.08); color: var(--accent-red); }
+
+/* ── Password Form ── */
+.passForm {
+  display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end;
+}

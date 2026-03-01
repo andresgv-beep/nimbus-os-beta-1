@@ -81,6 +81,9 @@ export default function SmbPanel() {
   const [localConfig, setLocalConfig] = useState(null);
   const [confPreview, setConfPreview] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [smbPassword, setSmbPassword] = useState({ user: '', pass: '', show: false });
+  const [settingPass, setSettingPass] = useState(false);
 
   const authHeaders = { 'Authorization': `Bearer ${token}` };
   const authJsonHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -171,6 +174,36 @@ export default function SmbPanel() {
   const updateConfig = (key, value) => {
     setLocalConfig(prev => ({ ...prev, [key]: value }));
     setConfigDirty(true);
+  };
+
+  const syncUsers = async () => {
+    setSyncResult('syncing');
+    try {
+      const r = await fetch('/api/smb/sync-users', { method: 'POST', headers: authHeaders });
+      const d = await r.json();
+      setSyncResult(d);
+    } catch {
+      setSyncResult({ error: 'Failed to sync' });
+    }
+  };
+
+  const setSmbPass = async () => {
+    if (!smbPassword.user || !smbPassword.pass) return;
+    setSettingPass(true);
+    try {
+      const r = await fetch('/api/smb/set-password', {
+        method: 'POST',
+        headers: authJsonHeaders,
+        body: JSON.stringify({ username: smbPassword.user, password: smbPassword.pass }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setSmbPassword({ user: '', pass: '', show: false });
+        setSyncResult(null);
+        syncUsers(); // refresh status
+      }
+    } catch {}
+    setSettingPass(false);
   };
 
   if (loading) {
@@ -273,7 +306,8 @@ export default function SmbPanel() {
             tabs={[
               { id: 'overview', label: 'Shares', icon: '📂' },
               { id: 'clients', label: 'Clients', icon: '🖥' },
-              { id: 'config', label: 'Configuration', icon: '⚙️' },
+              { id: 'users', label: 'Users', icon: '👤' },
+              { id: 'config', label: 'Config', icon: '⚙️' },
               { id: 'conf', label: 'smb.conf', icon: '📄' },
             ]}
           />
@@ -398,6 +432,96 @@ export default function SmbPanel() {
                   🔒 {data.lockedFiles} file{data.lockedFiles > 1 ? 's' : ''} currently locked
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── TAB: Users ── */}
+          {tab === 'users' && (
+            <div className={styles.configSection}>
+              <div className={styles.configCard}>
+                <div className={styles.configCardTitle}>Samba User Sync</div>
+                <p className={styles.desc} style={{ marginBottom: 12 }}>
+                  Samba requires Linux system users with their own passwords. Use "Sync Users" to create 
+                  Linux accounts for all NimbusOS users, then set their SMB password below.
+                </p>
+                <button
+                  className={styles.btnPrimary}
+                  onClick={syncUsers}
+                  disabled={syncResult === 'syncing'}
+                >
+                  {syncResult === 'syncing' ? 'Syncing…' : '🔄 Sync Users'}
+                </button>
+
+                {syncResult && syncResult !== 'syncing' && !syncResult.error && (
+                  <div className={styles.tableWrap} style={{ marginTop: 12 }}>
+                    <table className={styles.table}>
+                      <thead>
+                        <tr><th>User</th><th>Linux Account</th><th>Samba Password</th></tr>
+                      </thead>
+                      <tbody>
+                        {(syncResult.users || []).map((u, i) => (
+                          <tr key={i}>
+                            <td className={styles.cellBold}>{u.username}</td>
+                            <td>
+                              <span className={`${styles.badge} ${u.linuxUser ? styles.badgeGood : styles.badgeDanger}`}>
+                                {u.linuxUser ? '✓ Created' : '✗ Missing'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`${styles.badge} ${u.sambaUser ? styles.badgeGood : styles.badgeWarn}`}>
+                                {u.sambaUser ? '✓ Set' : '⚠ Not set'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className={styles.configCard}>
+                <div className={styles.configCardTitle}>Set SMB Password</div>
+                <p className={styles.desc} style={{ marginBottom: 12 }}>
+                  Set or update the Samba password for a NimbusOS user. This is required for SMB access.
+                </p>
+                <div className={styles.passForm}>
+                  <div>
+                    <label className={styles.fieldLabel}>Username</label>
+                    <input
+                      className={styles.fieldInput}
+                      style={{ maxWidth: '100%', textAlign: 'left' }}
+                      placeholder="username"
+                      value={smbPassword.user}
+                      onChange={e => setSmbPassword(p => ({ ...p, user: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className={styles.fieldLabel}>SMB Password</label>
+                    <input
+                      className={styles.fieldInput}
+                      style={{ maxWidth: '100%', textAlign: 'left' }}
+                      type={smbPassword.show ? 'text' : 'password'}
+                      placeholder="••••••"
+                      value={smbPassword.pass}
+                      onChange={e => setSmbPassword(p => ({ ...p, pass: e.target.value }))}
+                    />
+                  </div>
+                  <button
+                    className={styles.btnPrimary}
+                    onClick={setSmbPass}
+                    disabled={settingPass || !smbPassword.user || !smbPassword.pass}
+                    style={{ alignSelf: 'flex-end' }}
+                  >
+                    {settingPass ? 'Setting…' : 'Set Password'}
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.infoBar}>
+                💡 When creating new users in Control Panel, their Linux account and SMB password 
+                are now set automatically. This page is for existing users created before this feature.
+              </div>
             </div>
           )}
 
