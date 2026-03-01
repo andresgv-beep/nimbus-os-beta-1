@@ -74,6 +74,7 @@ export default function Taskbar() {
   const [launcherOpen, setLauncherOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState(null);
   const [userMenu, setUserMenu] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [dockerApps, setDockerApps] = useState([]);
   const userMenuRef = useRef(null);
 
@@ -312,19 +313,19 @@ export default function Taskbar() {
                 <span className={styles.userDropdownName}>{auth.user?.username || 'admin'}</span>
               </div>
               <div className={styles.userDropdownSep} />
-              <div className={styles.userDropdownItem} onClick={() => { setUserMenu(false); auth.lock?.(); }}>
+              <div className={styles.userDropdownItem} onClick={() => { setUserMenu(false); setConfirmDialog({ action: 'lock', title: 'Lock Session', message: 'Are you sure you want to lock the session?' }); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
                 </svg>
                 Lock
               </div>
-              <div className={styles.userDropdownItem} onClick={() => { setUserMenu(false); }}>
+              <div className={styles.userDropdownItem} onClick={() => { setUserMenu(false); setConfirmDialog({ action: 'restart', title: 'Restart System', message: 'Are you sure you want to restart the system?' }); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                 </svg>
                 Restart
               </div>
-              <div className={`${styles.userDropdownItem} ${styles.userDropdownDanger}`} onClick={() => { setUserMenu(false); auth.logout?.(); }}>
+              <div className={`${styles.userDropdownItem} ${styles.userDropdownDanger}`} onClick={() => { setUserMenu(false); setConfirmDialog({ action: 'shutdown', title: 'Shut Down', message: 'Are you sure you want to shut down the system?' }); }}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
                 </svg>
@@ -335,6 +336,41 @@ export default function Taskbar() {
           </div>
         </div>
       </div>
+
+      {confirmDialog && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999 }}
+          onClick={() => setConfirmDialog(null)}>
+          <div style={{ background: 'var(--bg-window)', border: '1px solid var(--border)', borderRadius: 'var(--radius-xl)', padding: '28px 32px', maxWidth: 360, width: '90%', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-medium)', color: 'var(--text-primary)', marginBottom: 12 }}>
+              {confirmDialog.title}
+            </div>
+            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 24, lineHeight: 1.5 }}>
+              {confirmDialog.message}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setConfirmDialog(null)}
+                style={{ padding: '8px 20px', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                Cancel
+              </button>
+              <button onClick={async () => {
+                const action = confirmDialog.action;
+                setConfirmDialog(null);
+                if (action === 'lock') {
+                  auth.lock?.();
+                } else if (action === 'restart') {
+                  await fetch('/api/system/reboot', { method: 'POST', headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' } });
+                } else if (action === 'shutdown') {
+                  await fetch('/api/system/shutdown', { method: 'POST', headers: { 'Authorization': `Bearer ${auth.token}`, 'Content-Type': 'application/json' } });
+                }
+              }}
+                style={{ padding: '8px 20px', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-sans)', background: confirmDialog.action === 'shutdown' ? 'var(--accent-red, #ef5350)' : 'var(--accent)', border: 'none', borderRadius: 'var(--radius-sm)', color: 'white', cursor: 'pointer', fontWeight: 'var(--weight-medium)' }}>
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
