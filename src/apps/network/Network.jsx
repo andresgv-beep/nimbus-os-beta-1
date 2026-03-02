@@ -11,13 +11,15 @@ import SshPanel from './SshPanel';
 import FtpPanel from './FtpPanel';
 import NfsPanel from './NfsPanel';
 import ProxyPanel from './ProxyPanel';
+import RemoteAccessPanel from './RemoteAccessPanel';
 import styles from './Network.module.css';
 
 /* ─── Sidebar config ─── */
 const SIDEBAR = [
   { id: 'ifaces', label: 'Interfaces', section: 'Network' },
   { id: 'dns', label: 'DNS' },
-  { id: 'ports', label: 'Port Exposure', section: 'External Access' },
+  { id: 'remote', label: 'Remote Access', section: 'External Access' },
+  { id: 'ports', label: 'Port Exposure' },
   { id: 'ddns', label: 'DDNS' },
   { id: 'proxy', label: 'Reverse Proxy' },
   { id: 'certs', label: 'Certificates' },
@@ -968,7 +970,7 @@ function Fail2banPage() {
 /* ─── Main Network Component ─── */
 export default function Network() {
   const { token } = useAuth();
-  const [active, setActive] = useState('ports');
+  const [active, setActive] = useState('remote');
   const [services, setServices] = useState({
     smb: false, ftp: false, ssh: false, nfs: false, webdav: false,
   });
@@ -1016,6 +1018,7 @@ export default function Network() {
     switch (active) {
       case 'ifaces': return <InterfacesPage />;
       case 'dns': return <DnsPanel />;
+      case 'remote': return <RemoteAccessPanel />;
       case 'ports': return <PortsPage />;
       case 'ddns': return <DDNSPage />;
       case 'proxy': return <ProxyPanel />;
