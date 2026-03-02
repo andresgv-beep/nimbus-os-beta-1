@@ -1,0 +1,385 @@
+/* ═══════════════════════════════════════════
+   NimbusOS — Remote Access Panel
+   Step-based wizard with collapsible sections
+   ═══════════════════════════════════════════ */
+
+/* ─── Step cards ─── */
+.stepCard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.2s;
+  margin-bottom: 6px;
+}
+.stepCardActive {
+  border-color: rgba(74, 144, 164, 0.4);
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.stepHeader:hover {
+  background: var(--bg-hover);
+}
+
+.stepBadge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border);
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+.stepDone {
+  background: rgba(76, 175, 80, 0.12);
+  border-color: rgba(76, 175, 80, 0.3);
+  color: var(--accent-green);
+}
+.stepActive {
+  background: rgba(74, 144, 164, 0.12);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.stepTitle { flex: 1; min-width: 0; }
+.stepTitle > div:first-child {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+}
+.stepSub {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.stepStatus {
+  flex-shrink: 0;
+}
+
+.chevron {
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.stepBody {
+  padding: 0 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+/* ─── Status dots ─── */
+.statusDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.dotOk {
+  background: var(--accent-green);
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+}
+.dotOff {
+  background: var(--text-muted);
+  opacity: 0.4;
+}
+
+/* ─── Field layout ─── */
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldRow {
+  display: flex;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .fieldRow { flex-direction: column; }
+}
+
+.toggleLabel {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* ─── Domain suffix tag ─── */
+.domainSuffix {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text-muted);
+  height: 36px;
+  white-space: nowrap;
+}
+
+/* ─── Dropdown ─── */
+.dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  z-index: 10;
+  margin-top: 4px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.dropdownItem {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: background 0.15s;
+}
+.dropdownItem:hover { background: var(--bg-hover); }
+.dropdownItemActive {
+  background: rgba(74, 144, 164, 0.08);
+  color: var(--accent);
+}
+
+.dnsBadge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(76, 175, 80, 0.08);
+  color: var(--accent-green);
+  font-weight: 500;
+}
+
+/* ─── Method selection cards ─── */
+.methodGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .methodGrid { grid-template-columns: 1fr; }
+}
+
+.methodCard {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+  align-items: flex-start;
+}
+.methodCard:hover { border-color: rgba(74, 144, 164, 0.3); background: var(--bg-hover); }
+.methodCardActive {
+  border-color: var(--accent);
+  background: rgba(74, 144, 164, 0.06);
+}
+.methodCardDisabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.methodIcon { font-size: 20px; flex-shrink: 0; margin-top: 1px; }
+.methodLabel {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.methodDesc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.recommendedBadge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(74, 144, 164, 0.12);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ─── Result boxes ─── */
+.resultBox {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  overflow: auto;
+  max-height: 200px;
+}
+.resultBox pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.resultOk {
+  background: rgba(76, 175, 80, 0.06);
+  border: 1px solid rgba(76, 175, 80, 0.15);
+  color: var(--accent-green);
+}
+.resultErr {
+  background: rgba(239, 83, 80, 0.06);
+  border: 1px solid rgba(239, 83, 80, 0.15);
+  color: var(--accent-red);
+}
+
+/* ─── Info / warn / success boxes ─── */
+.highlightBox {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: rgba(74, 144, 164, 0.06);
+  border: 1px solid rgba(74, 144, 164, 0.15);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.highlightBox strong { color: var(--text-primary); }
+
+.warnBox {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(255, 167, 38, 0.06);
+  border: 1px solid rgba(255, 167, 38, 0.15);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: var(--accent-amber);
+}
+
+.successBanner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 14px;
+  background: rgba(76, 175, 80, 0.06);
+  border: 1px solid rgba(76, 175, 80, 0.15);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  color: var(--accent-green);
+}
+
+/* ─── Mode bar ─── */
+.modeBar {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.modeBtn {
+  flex: 1;
+  padding: 8px 14px;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s;
+  font-family: inherit;
+}
+.modeBtn:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
+.modeBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.modeBtnActive {
+  background: var(--accent);
+  color: white;
+}
+.modeBtnActive:hover { background: var(--accent); color: white; }
+
+.comingSoon {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  font-weight: 600;
+}
+
+/* ─── Cert info ─── */
+.certInfo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 20px;
+  padding: 8px 0;
+}
+.certLabel {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* ─── Connection summary ─── */
+.summaryGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.summaryRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+}
+.summaryRow:not(:last-child) {
+  border-bottom: 1px solid var(--border);
+}
+.summaryLabel {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.summaryValue {
+  font-size: var(--text-sm);
+  text-align: right;
+}
