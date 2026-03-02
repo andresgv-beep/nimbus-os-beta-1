@@ -129,6 +129,17 @@ export function PortsIcon({ size, style, className }) {
   );
 }
 
+export function RemoteAccessIcon({ size, style, className }) {
+  return (
+    <I size={size} style={style} className={className}>
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M2 12h20"/>
+      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+      <path d="M8 12l2 2 4-4"/>
+    </I>
+  );
+}
+
 // ─── Icon Map ───
 
 const iconMap = {
@@ -145,6 +156,7 @@ const iconMap = {
   fail2ban: Fail2banIcon,
   ifaces: InterfacesIcon,
   ports: PortsIcon,
+  remote: RemoteAccessIcon,
 };
 
 // ─── Generic ServiceIcon ───
