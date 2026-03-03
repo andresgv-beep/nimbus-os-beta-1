@@ -7,7 +7,7 @@ import dockerIcon from '@icons/apps/docker.png';
 import networkIcon from '@icons/apps/network.png';
 import terminalIcon from '@icons/apps/terminal.png';
 import settingsIcon from '@icons/apps/settings.png';
-import controlpanelIcon from '@icons/apps/controlpanel.svg';
+import controlpanelIcon from '@icons/apps/controlpanel.png';
 import filesIcon from '@icons/apps/files.png';
 import storageIcon from '@icons/apps/storage.png';
 import monitorIcon from '@icons/apps/monitor.png';
