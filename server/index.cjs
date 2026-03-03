@@ -3957,23 +3957,17 @@ function handleWebdav(url, method, body, req) {
   if (!session) return { error: 'Not authenticated' };
 
   if (url === '/api/webdav/status' && method === 'GET') {
-    // Detect web server (apache or nginx)
-    const apacheInstalled = !!(run('which apache2 2>/dev/null') || run('test -x /usr/sbin/apache2 && echo yes'));
     const nginxInstalled = !!(run('which nginx 2>/dev/null') || run('test -x /usr/sbin/nginx && echo yes'));
-    const installed = apacheInstalled || nginxInstalled;
+    const installed = nginxInstalled;
     
     let running = false;
     let version = null;
-    let server = null;
+    let server = 'Nginx';
     
-    if (apacheInstalled) {
-      running = run('systemctl is-active apache2 2>/dev/null') === 'active';
-      version = run('apache2 -v 2>/dev/null | head -1') || null;
-      server = 'Apache';
-    } else if (nginxInstalled) {
-      running = run('systemctl is-active nginx 2>/dev/null') === 'active';
+    if (nginxInstalled) {
+      // WebDAV is "running" if its site config is enabled in nginx
+      running = fs.existsSync('/etc/nginx/sites-enabled/nimbusos-webdav.conf');
       version = run('nginx -v 2>&1 | head -1') || null;
-      server = 'Nginx';
     }
 
     const config = getWebdavConfig();
@@ -4000,7 +3994,9 @@ function handleWebdav(url, method, body, req) {
   if (url === '/api/webdav/start' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl start apache2 2>/dev/null || sudo systemctl start nginx 2>/dev/null',
+      // Enable WebDAV nginx config without affecting other nginx sites (like HTTPS)
+      run('sudo ln -sf /etc/nginx/sites-available/nimbusos-webdav.conf /etc/nginx/sites-enabled/ 2>/dev/null');
+      execSync('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null',
         { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) {
@@ -4011,7 +4007,9 @@ function handleWebdav(url, method, body, req) {
   if (url === '/api/webdav/stop' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl stop apache2 2>/dev/null || sudo systemctl stop nginx 2>/dev/null',
+      // Disable WebDAV config only — never stop nginx (HTTPS depends on it)
+      run('sudo rm -f /etc/nginx/sites-enabled/nimbusos-webdav.conf 2>/dev/null');
+      execSync('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null',
         { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) {
@@ -4022,7 +4020,7 @@ function handleWebdav(url, method, body, req) {
   if (url === '/api/webdav/restart' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl restart apache2 2>/dev/null || sudo systemctl restart nginx 2>/dev/null',
+      execSync('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null',
         { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) {
