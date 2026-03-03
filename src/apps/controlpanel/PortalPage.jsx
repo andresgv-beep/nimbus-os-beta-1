@@ -129,14 +129,14 @@ export default function PortalPage() {
         <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
           <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(74,144,164,0.06)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTP</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>:{currentPort}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.4rem', fontWeight: 600 }}>{currentPort}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
               http://{window.location.hostname}:{currentPort}
             </div>
           </div>
           <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(76,175,80,0.06)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTPS</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>:{data?.httpsPort || 5001}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.4rem', fontWeight: 600 }}>{data?.httpsPort || 5001}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
               {data?.httpsEnabled ? 'Enabled' : 'Not configured'}
             </div>
@@ -152,10 +152,10 @@ export default function PortalPage() {
             <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTP Port</label>
             <input
               className={styles.input}
-              type="number" min="1" max="65535"
+              type="text" inputMode="numeric" pattern="[0-9]*"
               value={httpPort}
-              onChange={e => { setHttpPort(e.target.value); setDirty(true); }}
-              style={{ fontFamily: 'var(--font-mono)' }}
+              onChange={e => { const v = e.target.value.replace(/\D/g,''); setHttpPort(v); setDirty(true); }}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', textAlign: 'center' }}
             />
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Default: 5000</div>
           </div>
@@ -163,10 +163,10 @@ export default function PortalPage() {
             <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTPS Port</label>
             <input
               className={styles.input}
-              type="number" min="1" max="65535"
+              type="text" inputMode="numeric" pattern="[0-9]*"
               value={httpsPort}
-              onChange={e => { setHttpsPort(e.target.value); setDirty(true); }}
-              style={{ fontFamily: 'var(--font-mono)' }}
+              onChange={e => { const v = e.target.value.replace(/\D/g,''); setHttpsPort(v); setDirty(true); }}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', textAlign: 'center' }}
             />
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Default: 5001</div>
           </div>
