@@ -6985,6 +6985,24 @@ const routes = {
   '/api/gpu': () => getGpu(),
   '/api/temps': () => getTemps(),
   '/api/network': () => getNetwork(),
+  '/api/system/info': () => {
+    const interfaces = getNetwork();
+    const hostname = os.hostname();
+    const gateway = run("ip route | grep default | awk '{print $3}' | head -1") || '—';
+    const dns = run("cat /etc/resolv.conf 2>/dev/null | grep nameserver | awk '{print $2}'") || '';
+    const dnsServers = dns.split('\n').filter(Boolean);
+    const primaryIface = interfaces.find(n => n.ip !== '—') || {};
+    const subnet = run(`ip -4 -o addr show ${primaryIface.name || 'eth0'} 2>/dev/null | awk '{print $4}'`) || '—';
+    return {
+      network: {
+        hostname,
+        gateway,
+        subnet,
+        dns: dnsServers,
+        interfaces,
+      }
+    };
+  },
   '/api/storage/disks': () => detectStorageDisks(),
   '/api/storage/pools': () => getStoragePools(),
   '/api/storage/status': () => ({ pools: getStoragePools(), alerts: storageAlerts, hasPool: hasPool() }),
