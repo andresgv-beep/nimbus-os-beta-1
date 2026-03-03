@@ -458,7 +458,16 @@ EOF
   echo 'client_max_body_size 10G;' > /etc/nginx/conf.d/nimbusos.conf
 
   # Test and start
-  nginx -t 2>/dev/null && systemctl enable nginx && systemctl restart nginx
+  # Remove any stale HTTPS config from previous install (causes nginx -t to fail)
+  rm -f /etc/nginx/sites-enabled/nimbusos-https.conf 2>/dev/null
+  
+  # Enable and start nginx (required for NimbusOS reverse proxy and HTTPS)
+  systemctl enable nginx 2>/dev/null || true
+  nginx -t 2>/dev/null && systemctl restart nginx || {
+    # If nginx fails, remove all custom configs and retry
+    rm -f /etc/nginx/sites-enabled/nimbusos-* 2>/dev/null
+    nginx -t 2>/dev/null && systemctl restart nginx
+  }
   
   ok "Nginx configured (port 80 → NimbusOS, ready for proxy rules)"
 }
