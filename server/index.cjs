@@ -3941,11 +3941,54 @@ function getWebdavConfig() {
     }
   } catch {}
   return {
-    httpPort: '80',
-    httpsPort: '443',
+    httpPort: '5005',
+    httpsPort: '5006',
     maxUploadMB: 10240,
     requireAuth: true,
   };
+}
+
+function generateWebdavNginxConf() {
+  const config = getWebdavConfig();
+  const shares = getShares();
+  const webdavShares = shares.filter(s => s.webdav);
+  
+  let locations = '';
+  for (const share of webdavShares) {
+    const sharePath = share.path || `/nimbus/pools/${share.pool}/shares/${share.name}`;
+    locations += `
+    location /${share.name} {
+        alias ${sharePath};
+        dav_methods PUT DELETE MKCOL COPY MOVE;
+        dav_ext_methods PROPFIND OPTIONS;
+        dav_access user:rw group:rw all:r;
+        client_max_body_size ${config.maxUploadMB || 10240}m;
+        autoindex on;
+        create_full_put_path on;
+    }
+`;
+  }
+  
+  if (!locations) {
+    locations = `
+    location / {
+        return 200 'WebDAV server running. No shares enabled.';
+        add_header Content-Type text/plain;
+    }
+`;
+  }
+  
+  const conf = `# NimbusOS WebDAV — managed by WebDAV panel
+server {
+    listen ${config.httpPort || 5005};
+    listen [::]:${config.httpPort || 5005};
+    server_name _;
+${locations}
+}
+`;
+  
+  fs.writeFileSync('/etc/nginx/sites-available/nimbusos-webdav.conf', conf);
+  return conf;
 }
 
 function saveWebdavConfig(config) {
@@ -3994,10 +4037,18 @@ function handleWebdav(url, method, body, req) {
   if (url === '/api/webdav/start' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      // Enable WebDAV nginx config without affecting other nginx sites (like HTTPS)
+      // Generate/update WebDAV nginx config, then enable it
+      generateWebdavNginxConf();
       run('sudo ln -sf /etc/nginx/sites-available/nimbusos-webdav.conf /etc/nginx/sites-enabled/ 2>/dev/null');
-      execSync('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null',
+      const test = run('sudo nginx -t 2>&1');
+      if (test && test.includes('failed')) {
+        run('sudo rm -f /etc/nginx/sites-enabled/nimbusos-webdav.conf 2>/dev/null');
+        return { error: 'Nginx config test failed', detail: test };
+      }
+      execSync('sudo systemctl reload nginx 2>/dev/null',
         { encoding: 'utf-8', timeout: 15000 });
+      const config = getWebdavConfig();
+      run(`sudo ufw allow ${config.httpPort || 5005}/tcp comment 'NimbusOS WebDAV' 2>/dev/null`);
       return { ok: true };
     } catch (err) {
       return { error: 'Failed to start', detail: err.message };
@@ -4038,6 +4089,11 @@ function handleWebdav(url, method, body, req) {
     if (!share) return { error: 'Share not found' };
     share.webdav = body.enabled !== false;
     saveShares(shares);
+    // Regenerate and reload nginx config if WebDAV is running
+    if (fs.existsSync('/etc/nginx/sites-enabled/nimbusos-webdav.conf')) {
+      generateWebdavNginxConf();
+      run('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null');
+    }
     return { ok: true, name, webdavEnabled: share.webdav };
   }
 
