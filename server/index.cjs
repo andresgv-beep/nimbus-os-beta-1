@@ -7891,8 +7891,10 @@ const server = http.createServer((req, res) => {
           fs.mkdirSync('/var/log/nimbusos', { recursive: true });
         }
 
+        // Remove previous result
+        try { fs.unlinkSync('/var/log/nimbusos/update-result.json'); } catch {}
+
         // Launch update fully detached from this process
-        // nohup + setsid ensures the script survives when systemctl kills Node
         const { spawn } = require('child_process');
         const logFile = fs.openSync('/var/log/nimbusos/update.log', 'a');
         const child = spawn('setsid', ['bash', updateScript], {
@@ -7902,11 +7904,25 @@ const server = http.createServer((req, res) => {
         child.unref();
 
         res.writeHead(200, CORS_HEADERS);
-        return res.end(JSON.stringify({ ok: true, message: 'Update started. The service will restart shortly.' }));
+        return res.end(JSON.stringify({ ok: true, message: 'Update started.' }));
       } catch (err) {
         res.writeHead(500, CORS_HEADERS);
         return res.end(JSON.stringify({ error: err.message }));
       }
+    }
+
+    // GET /api/system/update/status — check if update finished and what type
+    if (url === '/api/system/update/status' && method === 'GET') {
+      const resultFile = '/var/log/nimbusos/update-result.json';
+      if (fs.existsSync(resultFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+          res.writeHead(200, CORS_HEADERS);
+          return res.end(JSON.stringify({ done: true, ...result }));
+        } catch {}
+      }
+      res.writeHead(200, CORS_HEADERS);
+      return res.end(JSON.stringify({ done: false }));
     }
 
     res.writeHead(404, CORS_HEADERS);
