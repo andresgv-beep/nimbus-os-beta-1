@@ -23,6 +23,11 @@ const SESSIONS_FILE = path.join(CONFIG_DIR, 'sessions.json');
 
 // Load sessions from disk (survive restarts)
 let SESSIONS = {};
+
+// Security: hash tokens before storing
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
 try {
   if (fs.existsSync(SESSIONS_FILE)) {
     SESSIONS = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
@@ -435,7 +440,7 @@ setInterval(() => {
 const SERVER_KEY_FILE = path.join(CONFIG_DIR, '.server_key');
 function getServerKey() {
   if (fs.existsSync(SERVER_KEY_FILE)) return fs.readFileSync(SERVER_KEY_FILE, 'utf-8').trim();
-  const key = crypto.randomBytes(32).toString('hex');
+  const key = crypto.randomBytes(48).toString('base64url');
   fs.writeFileSync(SERVER_KEY_FILE, key, { mode: 0o600 });
   return key;
 }
@@ -466,6 +471,13 @@ function generateBackupCodes(count = 8) {
     codes.push(crypto.randomBytes(4).toString('hex').toUpperCase());
   }
   return codes;
+}
+
+function validatePassword(password) {
+  if (!password || password.length < 8) return 'Password must be at least 8 characters';
+  if (!/[A-Z]/.test(password)) return 'Password must contain at least one uppercase letter';
+  if (!/[0-9]/.test(password)) return 'Password must contain at least one number';
+  return null;
 }
 
 function hashPassword(password) {
@@ -582,7 +594,7 @@ function verifyPassword(password, stored) {
 }
 
 function generateToken() {
-  return crypto.randomBytes(32).toString('hex');
+  return crypto.randomBytes(48).toString('base64url');
 }
 
 function getUsers() {
@@ -591,7 +603,7 @@ function getUsers() {
 }
 
 function saveUsers(users) {
-  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), { mode: 0o600 });
 }
 
 function isSetupDone() {
@@ -602,7 +614,7 @@ function isSetupDone() {
 function getSessionUser(req) {
   const auth = req.headers['authorization'] || '';
   const token = auth.replace('Bearer ', '');
-  const session = SESSIONS[token];
+  const session = SESSIONS[hashToken(token)];
   
   // Check if session exists and hasn't expired
   if (session && (Date.now() - session.created < SESSION_EXPIRY_MS)) {
@@ -610,7 +622,7 @@ function getSessionUser(req) {
   }
   
   // Clean expired session
-  if (session) delete SESSIONS[token];
+  if (session) delete SESSIONS[hashToken(token)];
   return null;
 }
 
@@ -652,11 +664,15 @@ function ensureLinuxUser(username) {
 
 function ensureSmbUser(username, password) {
   ensureLinuxUser(username);
-  // Set samba password (pipe it to smbpasswd)
+  // Set samba password securely via stdin (password not visible in ps aux)
   try {
-    execSync(`(echo "${password}"; echo "${password}") | sudo smbpasswd -s -a "${username}" 2>/dev/null`, 
-      { encoding: 'utf-8', timeout: 10000 });
-    return true;
+    const { spawnSync } = require('child_process');
+    const result = spawnSync('sudo', ['smbpasswd', '-s', '-a', username], {
+      input: password + '\n' + password + '\n',
+      encoding: 'utf-8',
+      timeout: 10000,
+    });
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -684,7 +700,8 @@ function handleAuth(url, method, body, req) {
     if (isSetupDone()) return { error: 'Setup already completed' };
     const { username, password, deviceName } = body;
     if (!username || !password) return { error: 'Username and password required' };
-    if (password.length < 4) return { error: 'Password must be at least 4 characters' };
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(username.trim())) return { error: 'Invalid username: letters, numbers and underscores only (2-32 chars)' };
+    const pwErr = validatePassword(password); if (pwErr) return { error: pwErr };
 
     const users = [{
       username: username.toLowerCase().trim(),
@@ -704,7 +721,7 @@ function handleAuth(url, method, body, req) {
 
     // Auto-login after setup
     const token = generateToken();
-    SESSIONS[token] = { username: users[0].username, role: 'admin', created: Date.now() };
+    SESSIONS[hashToken(token)] = { username: users[0].username, role: 'admin', created: Date.now() };
     saveSessions();
 
     return { ok: true, token, user: { username: users[0].username, role: 'admin' } };
@@ -753,7 +770,7 @@ function handleAuth(url, method, body, req) {
 
     clearFailedAttempts(clientIp);
     const token = generateToken();
-    SESSIONS[token] = { username: user.username, role: user.role, created: Date.now() };
+    SESSIONS[hashToken(token)] = { username: user.username, role: user.role, created: Date.now() };
     saveSessions();
 
     return { ok: true, token, user: { username: user.username, role: user.role } };
@@ -782,6 +799,8 @@ function handleAuth(url, method, body, req) {
     }
     
     editUser.password = hashPassword(newPassword);
+    // Invalidate all sessions for this user
+    for (const [tk, sess] of Object.entries(SESSIONS)) { if (sess.username === editUser.username) delete SESSIONS[tk]; }
     saveUsers(users);
     
     // Also update Linux/Samba password
@@ -888,7 +907,7 @@ function handleAuth(url, method, body, req) {
   if (url === '/api/auth/logout' && method === 'POST') {
     const auth = req.headers['authorization'] || '';
     const token = auth.replace('Bearer ', '');
-    delete SESSIONS[token];
+    delete SESSIONS[hashToken(token)];
     saveSessions();
     return { ok: true };
   }
@@ -1105,7 +1124,8 @@ function handleAuth(url, method, body, req) {
     if (!session || session.role !== 'admin') return { error: 'Unauthorized' };
     const { username, password, role, description } = body;
     if (!username || !password) return { error: 'Username and password required' };
-    if (password.length < 4) return { error: 'Password must be at least 4 characters' };
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{1,31}$/.test(username.trim())) return { error: 'Invalid username: letters, numbers and underscores only (2-32 chars)' };
+    const pwErr = validatePassword(password); if (pwErr) return { error: pwErr };
 
     const users = getUsers();
     if (users.find(u => u.username === username.toLowerCase().trim())) {
@@ -2996,6 +3016,17 @@ function handlePortal(url, method, body, req) {
       run(`sudo ufw allow ${hp}/tcp comment 'NimbusOS Web UI' 2>/dev/null`);
     }
     
+    
+    // Update nginx HTTPS proxy_pass if remote access is configured
+    const nginxHttpsConf = '/etc/nginx/sites-available/nimbusos-https.conf';
+    if (hp && fs.existsSync(nginxHttpsConf)) {
+      try {
+        let conf = fs.readFileSync(nginxHttpsConf, 'utf-8');
+        conf = conf.replace(/proxy_pass http:\/\/127\.0\.0\.1:\d+;/, `proxy_pass http://127.0.0.1:${hp};`);
+        fs.writeFileSync(nginxHttpsConf, conf);
+        run('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null');
+      } catch {}
+    }
     return { ok: true, needsRestart: true, message: `Port will change to ${hp || PORT} after restart. Run: sudo systemctl restart nimbusos` };
   }
 
@@ -7449,7 +7480,7 @@ const server = http.createServer((req, res) => {
           const parsed = body ? JSON.parse(body) : {};
           const auth = req.headers['authorization'] || '';
           const token = auth.replace('Bearer ', '');
-          const session = SESSIONS[token];
+          const session = SESSIONS[hashToken(token)];
           if (!session || session.role !== 'admin') { sendJson({ error: 'Unauthorized' }, 401); return; }
 
           if (url === '/api/upnp/add') {
@@ -7484,7 +7515,7 @@ const server = http.createServer((req, res) => {
   if (url === '/api/files/upload' && method === 'POST') {
     const auth = req.headers['authorization'] || '';
     const token = auth.replace('Bearer ', '');
-    const session = SESSIONS[token];
+    const session = SESSIONS[hashToken(token)];
     if (!session) { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Not authenticated' })); }
     return handleFileUpload(req, res, session);
   }
@@ -7493,7 +7524,7 @@ const server = http.createServer((req, res) => {
   if (url.startsWith('/api/files/download') && method === 'GET') {
     const urlObj = new URL('http://localhost' + req.url);
     const tkn = urlObj.searchParams.get('token');
-    const session = SESSIONS[tkn];
+    const session = SESSIONS[hashToken(tkn)];
     if (!session) { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Not authenticated' })); }
     return handleFileDownload(req, res, session);
   }
@@ -7753,6 +7784,19 @@ const server = http.createServer((req, res) => {
 
   // ── System Update routes ──
   // ── System power actions ──
+  if (url === '/api/system/reboot-service' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      res.writeHead(200, CORS_HEADERS);
+      res.end(JSON.stringify({ ok: true, message: 'NimbusOS restarting...' }));
+      setTimeout(() => { try { execSync('sudo systemctl restart nimbusos'); } catch {} }, 1000);
+    });
+    return;
+  }
+
   if (url === '/api/system/reboot' && method === 'POST') {
     const session = getSessionUser(req);
     if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
