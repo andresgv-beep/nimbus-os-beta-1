@@ -12,8 +12,17 @@ const crypto = require('crypto');
 const path = require('path');
 
 const PORT = parseInt(process.env.NIMBUS_PORT || '5000');
-const NIMBUS_ROOT = path.join(os.homedir(), '.nimbusos');
-const CONFIG_DIR = path.join(NIMBUS_ROOT, 'config');
+
+// Detect data directory — check existing locations for backwards compatibility
+const NIMBUS_ROOT = process.env.NIMBUS_DATA_DIR
+  ? process.env.NIMBUS_DATA_DIR
+  : fs.existsSync(path.join(os.homedir(), '.nimbusos', 'config', 'users.json'))
+    ? path.join(os.homedir(), '.nimbusos')
+    : fs.existsSync('/root/.nimbusos/config/users.json')
+      ? '/root/.nimbusos'
+      : path.join(os.homedir(), '.nimbusos');
+const CONFIG_DIR = process.env.NIMBUS_CONFIG_DIR || path.join(NIMBUS_ROOT, 'config');
+const INSTALL_DIR = __dirname.replace(/[\/\\]server$/, '');
 const USER_DATA_DIR = path.join(NIMBUS_ROOT, 'userdata'); // Datos por usuario
 const USERS_FILE = path.join(CONFIG_DIR, 'users.json');
 const SHARES_FILE = path.join(CONFIG_DIR, 'shares.json');
@@ -2996,6 +3005,17 @@ function handlePortal(url, method, body, req) {
       run(`sudo ufw allow ${hp}/tcp comment 'NimbusOS Web UI' 2>/dev/null`);
     }
     
+    // Update nginx HTTPS proxy_pass if remote access is configured
+    const nginxHttpsConf = '/etc/nginx/sites-available/nimbusos-https.conf';
+    if (hp && fs.existsSync(nginxHttpsConf)) {
+      try {
+        let conf = fs.readFileSync(nginxHttpsConf, 'utf-8');
+        conf = conf.replace(/proxy_pass http:\/\/127\.0\.0\.1:\d+;/, `proxy_pass http://127.0.0.1:${hp};`);
+        fs.writeFileSync(nginxHttpsConf, conf);
+        run('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null');
+      } catch {}
+    }
+    
     return { ok: true, needsRestart: true, message: `Port will change to ${hp || PORT} after restart. Run: sudo systemctl restart nimbusos` };
   }
 
@@ -3819,7 +3839,16 @@ function handleRemoteAccess(url, method, body, req) {
     const { port, domain, enabled } = body;
     const httpsPort = port || 5009;
     const cfg = getRemoteAccessConfig();
-    const nimbusPort = parseInt(process.env.NIMBUS_PORT || '5000');
+    // Read current port from env file (may have changed via Portal)
+    let nimbusPort = parseInt(process.env.NIMBUS_PORT || '5000');
+    try {
+      const envFile = '/etc/nimbusos/nimbusos.env';
+      if (fs.existsSync(envFile)) {
+        const envContent = fs.readFileSync(envFile, 'utf-8');
+        const portMatch = envContent.match(/NIMBUS_PORT=(\d+)/);
+        if (portMatch) nimbusPort = parseInt(portMatch[1]);
+      }
+    } catch {}
 
     if (enabled) {
       const certDir = `/etc/letsencrypt/live/${domain}`;
@@ -7753,6 +7782,19 @@ const server = http.createServer((req, res) => {
 
   // ── System Update routes ──
   // ── System power actions ──
+  if (url === '/api/system/reboot-service' && method === 'POST') {
+    const session = getSessionUser(req);
+    if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      res.writeHead(200, CORS_HEADERS);
+      res.end(JSON.stringify({ ok: true, message: 'NimbusOS restarting...' }));
+      setTimeout(() => { try { execSync('sudo systemctl restart nimbusos'); } catch {} }, 1000);
+    });
+    return;
+  }
+
   if (url === '/api/system/reboot' && method === 'POST') {
     const session = getSessionUser(req);
     if (!session || session.role !== 'admin') { res.writeHead(401, CORS_HEADERS); return res.end(JSON.stringify({ error: 'Unauthorized' })); }
