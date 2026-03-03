@@ -1,7 +1,7 @@
 {
   "name": "nimbusos-ui",
   "private": true,
-  "version": "0.4.31",
+  "version": "0.4.32",
   "type": "module",
   "description": "NimbusOS — Desktop-class NAS operating system UI",
   "scripts": {
