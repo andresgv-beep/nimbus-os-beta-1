@@ -371,8 +371,9 @@ setup_samba() {
 # Add custom shares via the NimbusOS web interface
 EOF
 
-  systemctl enable smbd nmbd 2>/dev/null || true
-  systemctl restart smbd nmbd 2>/dev/null || true
+  # Don't auto-start services — user enables them from NimbusOS UI
+  systemctl disable smbd nmbd 2>/dev/null || true
+  systemctl stop smbd nmbd 2>/dev/null || true
 
   ok "Samba configured"
 }
@@ -407,8 +408,8 @@ pasv_max_port=55999
 ssl_enable=NO
 EOF
 
-  systemctl enable vsftpd 2>/dev/null || true
-  systemctl restart vsftpd 2>/dev/null || true
+  systemctl disable vsftpd 2>/dev/null || true
+  systemctl stop vsftpd 2>/dev/null || true
 
   ok "FTP configured (port 21, passive 55000-55999)"
 }
