@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@context';
 import { WifiIcon, GlobeIcon, ShieldIcon } from '@icons';
 import Icon from '@icons';
@@ -175,56 +175,85 @@ function PortsPage() {
 /* ─── Interfaces Page ─── */
 function InterfacesPage() {
   const [ifaces, setIfaces] = useState([]);
-  const [net, setNet] = useState({ hostname: '—', gateway: '—', subnet: '—' });
+  const [net, setNet] = useState({ hostname: '—', gateway: '—', subnet: '—', dns: [] });
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch('/api/system/info').then(r => r.json()).then(data => {
       const info = data?.network || {};
-      setNet({ hostname: info.hostname || '—', gateway: info.gateway || '—', subnet: info.subnet || '—' });
+      setNet({ hostname: info.hostname || '—', gateway: info.gateway || '—', subnet: info.subnet || '—', dns: info.dns || [] });
       setIfaces(info.interfaces || []);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    load();
+    const iv = setInterval(load, 5000);
+    return () => clearInterval(iv);
+  }, [load]);
+
   return (
     <div>
       <h3 className={styles.title}>Network Interfaces</h3>
+      <p className={styles.desc}>Physical network adapters detected on this system.</p>
       <div className={styles.tableCard}>
         {loading ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>
+        ) : ifaces.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 16 }}>
+            {ifaces.map((iface, i) => (
+              <div key={i} style={{ padding: '14px 18px', background: 'rgba(74,144,164,0.04)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 'var(--text-base)', fontWeight: 600 }}>{iface.name}</span>
+                    <span className={`${styles.badge} ${iface.ip !== '—' ? styles.badgeGood : ''}`} style={{ fontSize: 11 }}>
+                      {iface.ip !== '—' ? 'Connected' : 'Down'}
+                    </span>
+                    {iface.type === 'wifi' && iface.ssid && (
+                      <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: 'var(--radius-full)' }}>
+                        {iface.ssid} {iface.signal != null ? `(${iface.signal} dBm)` : ''}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    {iface.type === 'wifi' ? 'Wi-Fi' : 'Ethernet'} {iface.speed !== '—' ? `· ${iface.speed}` : ''}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>IP Address</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{iface.ip}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>MAC Address</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>{iface.mac || '—'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Download</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--accent-green, #66BB6A)' }}>{iface.rxRateFormatted || '0 B/s'}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Upload</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--accent-orange, #E95420)' }}>{iface.txRateFormatted || '0 B/s'}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
-          <table className={styles.table}>
-            <thead>
-              <tr><th>Interface</th><th>IP Address</th><th>MAC</th><th>Speed</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              {ifaces.length > 0 ? ifaces.map((iface, i) => (
-                <tr key={i}>
-                  <td className={styles.cellName}>{iface.name}</td>
-                  <td className={styles.mono}>{iface.ip || '—'}</td>
-                  <td className={styles.mono}>{iface.mac || '—'}</td>
-                  <td>{iface.speed || '—'}</td>
-                  <td><span className={`${styles.badge} ${iface.ip ? styles.badgeGood : ''}`}>{iface.ip ? 'Connected' : 'Down'}</span></td>
-                </tr>
-              )) : (
-                <tr>
-                  <td className={styles.cellName}>—</td>
-                  <td className={styles.mono}>—</td>
-                  <td className={styles.mono}>—</td>
-                  <td>—</td>
-                  <td><span className={styles.badge}>No interfaces detected</span></td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)' }}>No network interfaces detected</div>
         )}
       </div>
-      <div className={styles.configCard}>
+
+      <div className={styles.configCard} style={{ marginTop: 16 }}>
         <div className={styles.configTitle}>Network Settings</div>
         <div className={styles.configRow}><span className={styles.configLabel}>Hostname</span><span className={styles.configValue}>{net.hostname}</span></div>
         <div className={styles.configRow}><span className={styles.configLabel}>Gateway</span><span className={styles.configValue}>{net.gateway}</span></div>
         <div className={styles.configRow}><span className={styles.configLabel}>Subnet</span><span className={styles.configValue}>{net.subnet}</span></div>
+        {net.dns.length > 0 && (
+          <div className={styles.configRow}><span className={styles.configLabel}>DNS</span><span className={styles.configValue}>{net.dns.join(', ')}</span></div>
+        )}
       </div>
     </div>
   );
