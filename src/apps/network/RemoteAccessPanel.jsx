@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ServiceIcon } from '@icons/services/index.jsx';
 import {
   GlobeIcon, LockIcon, CheckCircleIcon, AlertTriangleIcon,
-  InfoIcon,
+  InfoIcon, KeyIcon, XCircleIcon, ShieldIcon,
 } from '@icons';
 import { useAuth } from '@context';
 import styles from './ServicePanel.module.css';
@@ -369,7 +369,7 @@ export default function RemoteAccessPanel() {
 
             {testResult && (
               <div className={`${ra.resultBox} ${testResult.ok ? ra.resultOk : ra.resultErr}`}>
-                <pre>{testResult.ok ? `✅ ${testResult.response || 'DDNS update successful'}` : `❌ ${testResult.error || 'Failed'}`}</pre>
+                <pre>{testResult.ok ? `✓ ${testResult.response || 'DDNS update successful'}` : `✗ ${testResult.error || 'Failed'}`}</pre>
               </div>
             )}
           </div>
@@ -426,8 +426,8 @@ export default function RemoteAccessPanel() {
               <label className={styles.fieldLabel}>Verification method</label>
               <div className={ra.methodGrid}>
                 {[
-                  { id: 'dns', label: 'DNS Challenge', desc: 'Automatic via API — no port 80 needed', icon: '🔑', recommended: provider.supportsDnsChallenge },
-                  { id: 'standalone', label: 'Standalone', desc: 'Port 80 must be open to the internet', icon: '🌐' },
+                  { id: 'dns', label: 'DNS Challenge', desc: 'Automatic via API — no port 80 needed', icon: 'key', recommended: provider.supportsDnsChallenge },
+                  { id: 'standalone', label: 'Standalone', desc: 'Port 80 must be open to the internet', icon: 'globe' },
                   { id: 'webroot', label: 'Webroot', desc: 'Requires running web server on port 80', icon: '📁' },
                 ].map(m => (
                   <div
@@ -438,7 +438,7 @@ export default function RemoteAccessPanel() {
                       setSsl(p => ({ ...p, method: m.id }));
                     }}
                   >
-                    <div className={ra.methodIcon}>{m.icon}</div>
+                    <div className={ra.methodIcon}>{m.icon === 'key' ? <KeyIcon size={18} style={{opacity:0.5}} /> : <GlobeIcon size={18} style={{opacity:0.5}} />}</div>
                     <div>
                       <div className={ra.methodLabel}>
                         {m.label}
@@ -454,13 +454,13 @@ export default function RemoteAccessPanel() {
             <div className={styles.btnRow}>
               <button className={styles.btnPrimary} onClick={handleRequestSSL}
                 disabled={saving || !fullDomain || !ssl.email}>
-                {saving ? 'Requesting…' : '🔒 Request Certificate'}
+                {saving ? 'Requesting…' : <><LockIcon size={14} style={{marginRight:4,opacity:0.7}} /> Request Certificate</>}
               </button>
             </div>
 
             {sslLog && (
               <div className={`${ra.resultBox} ${sslLog.ok ? ra.resultOk : ra.resultErr}`}>
-                <pre>{sslLog.ok ? `✅ Certificate obtained!\n\n${sslLog.log || ''}` : `❌ ${sslLog.error}\n\n${sslLog.log || ''}`}</pre>
+                <pre>{sslLog.ok ? `✓ Certificate obtained!\n\n${sslLog.log || ''}` : `✗ ${sslLog.error}\n\n${sslLog.log || ''}`}</pre>
               </div>
             )}
 
