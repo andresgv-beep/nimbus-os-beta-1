@@ -7994,6 +7994,22 @@ server.listen(PORT, '0.0.0.0', () => {
   Object.keys(routes).forEach(r => console.log(`    GET ${r}`));
   console.log(`\n  Auto-detecting hardware...`);
 
+  // ── Sync nginx HTTPS proxy with actual port ──
+  try {
+    const nginxConf = '/etc/nginx/sites-available/nimbusos-https.conf';
+    if (fs.existsSync(nginxConf)) {
+      let conf = fs.readFileSync(nginxConf, 'utf-8');
+      const currentProxy = conf.match(/proxy_pass http:\/\/127\.0\.0\.1:(\d+)/);
+      if (currentProxy && parseInt(currentProxy[1]) !== PORT) {
+        conf = conf.replace(/proxy_pass http:\/\/127\.0\.0\.1:\d+;/g, `proxy_pass http://127.0.0.1:${PORT};`);
+        fs.writeFileSync(nginxConf, conf);
+        run('sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null');
+        console.log(`    Nginx HTTPS proxy updated: port ${currentProxy[1]} → ${PORT}`);
+      }
+    }
+  } catch {}
+
+
   // ── Mount storage pools on startup ──
   try {
     const storageConf = getStorageConfig();
