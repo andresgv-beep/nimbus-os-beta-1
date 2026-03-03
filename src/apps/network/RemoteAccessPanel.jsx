@@ -507,9 +507,9 @@ export default function RemoteAccessPanel() {
             <div className={ra.fieldRow}>
               <div className={ra.fieldGroup}>
                 <label className={styles.fieldLabel}>HTTPS Port</label>
-                <input className={`${styles.fieldInput} ${styles.mono}`} type="number"
-                  value={httpsPort} onChange={e => setHttpsPort(parseInt(e.target.value) || 5009)}
-                  style={{ width: 120 }} />
+                <input className={`${styles.fieldInput} ${styles.mono}`} type="text" inputMode="numeric" pattern="[0-9]*"
+                  value={httpsPort} onChange={e => { const v = e.target.value.replace(/\D/g,''); setHttpsPort(parseInt(v) || 5009); }}
+                  style={{ width: 120, fontSize: '1.1rem', textAlign: 'center' }} />
                 <span className={styles.fieldHint}>Default: 5009. Avoid 443 unless no other HTTPS services run.</span>
               </div>
             </div>
