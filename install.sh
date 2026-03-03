@@ -102,18 +102,12 @@ install_deps() {
     mdadm gdisk \
     samba \
     vsftpd \
-    apache2 \
     nginx \
     certbot python3-certbot-nginx \
     ufw \
     avahi-daemon
 
   ok "Core packages installed"
-
-  # Enable Apache WebDAV modules
-  log "Configuring Apache WebDAV modules..."
-  a2enmod dav dav_fs headers auth_basic authn_file 2>/dev/null || true
-  ok "Apache WebDAV modules enabled"
 
   # Optional packages (nice to have, don't fail)
   log "Installing optional packages..."
@@ -129,7 +123,6 @@ install_deps() {
   command -v mdadm &>/dev/null || missing="$missing mdadm"
   command -v smartctl &>/dev/null || missing="$missing smartmontools"
   command -v vsftpd &>/dev/null || missing="$missing vsftpd"
-  command -v apache2 &>/dev/null || missing="$missing apache2"
 
   if [[ -n "$missing" ]]; then
     err "Failed to install critical packages:$missing"
@@ -421,59 +414,14 @@ EOF
 }
 
 # ── Configure Apache WebDAV ──
-setup_webdav() {
-  step "Configuring WebDAV (Apache)"
-
-  # Disable default site — NimbusOS uses port 5000, Apache only for WebDAV
-  a2dissite 000-default 2>/dev/null || true
-
-  # Create WebDAV directory
-  mkdir -p /var/lib/dav
-  chown www-data:www-data /var/lib/dav
-
-  # Create WebDAV vhost
-  cat > /etc/apache2/sites-available/nimbusos-webdav.conf << 'EOF'
-Listen 5005
-<VirtualHost *:5005>
-    ServerName localhost
-    DocumentRoot /var/www/webdav
-
-    <Directory /var/www/webdav>
-        Options Indexes
-        DAV On
-        AuthType Basic
-        AuthName "NimbusOS WebDAV"
-        AuthUserFile /etc/apache2/.htpasswd-webdav
-        Require valid-user
-    </Directory>
-
-    DavLockDB /var/lib/dav/lockdb
-    ErrorLog ${APACHE_LOG_DIR}/webdav-error.log
-    CustomLog ${APACHE_LOG_DIR}/webdav-access.log combined
-</VirtualHost>
-EOF
-
-  # Create webdav root and htpasswd
-  mkdir -p /var/www/webdav
-  chown www-data:www-data /var/www/webdav
-  touch /etc/apache2/.htpasswd-webdav
-
-  a2ensite nimbusos-webdav 2>/dev/null || true
-  
-  # Make sure Apache doesn't listen on 80/443 (Nginx handles those)
-  sed -i 's/^Listen 80/#Listen 80/' /etc/apache2/ports.conf 2>/dev/null || true
-  sed -i 's/^Listen 443/#Listen 443/' /etc/apache2/ports.conf 2>/dev/null || true
-  
-  # Don't start Apache yet — user enables it from NimbusOS UI
-  systemctl enable apache2 2>/dev/null || true
-  systemctl stop apache2 2>/dev/null || true
-
-  ok "WebDAV configured (port 5005, stopped until enabled from UI)"
-}
 
 # ── Configure Nginx (Reverse Proxy) ──
 setup_nginx() {
   step "Configuring Nginx (Reverse Proxy)"
+
+  # Ensure apache doesn't conflict with nginx (may come as dependency)
+  systemctl stop apache2 2>/dev/null || true
+  systemctl disable apache2 2>/dev/null || true
 
   # Remove default site
   rm -f /etc/nginx/sites-enabled/default 2>/dev/null
@@ -593,7 +541,6 @@ print_summary() {
   echo -e "    Node.js: $(node -v 2>/dev/null || echo 'not found')"
   echo -e "    Samba:   $(smbd --version 2>/dev/null || echo 'not found')"
   echo -e "    FTP:     $(vsftpd -v 2>&1 | head -1 2>/dev/null || echo 'not found')"
-  echo -e "    WebDAV:  $(apache2 -v 2>/dev/null | head -1 || echo 'not found')"
   echo -e "    NFS:     $(cat /proc/fs/nfsd/versions 2>/dev/null && echo 'installed' || echo 'not found')"
   echo -e "    Certbot: $(certbot --version 2>/dev/null || echo 'not found')"
   echo -e "    UFW:     $(ufw status 2>/dev/null | head -1 || echo 'not found')"
@@ -629,7 +576,6 @@ main() {
   setup_firewall
   setup_samba
   setup_ftp
-  setup_webdav
   setup_nginx
   setup_avahi
   start_nimbusos
