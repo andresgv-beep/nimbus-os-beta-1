@@ -3274,7 +3274,7 @@ function handleSsh(url, method, body, req) {
   if (url === '/api/ssh/start' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl start sshd 2>/dev/null || sudo systemctl start ssh 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      execSync('sudo systemctl enable ssh sshd 2>/dev/null; sudo systemctl start sshd 2>/dev/null || sudo systemctl start ssh 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -3282,7 +3282,7 @@ function handleSsh(url, method, body, req) {
   if (url === '/api/ssh/stop' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl stop sshd 2>/dev/null || sudo systemctl stop ssh 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      execSync('sudo systemctl stop sshd 2>/dev/null; sudo systemctl stop ssh 2>/dev/null; sudo systemctl disable ssh sshd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -3327,7 +3327,7 @@ function handleFtp(url, method, body, req) {
   if (url === '/api/ftp/start' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl start vsftpd 2>/dev/null || sudo systemctl start proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      execSync('sudo systemctl enable vsftpd 2>/dev/null; sudo systemctl start vsftpd 2>/dev/null || sudo systemctl start proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -3335,7 +3335,7 @@ function handleFtp(url, method, body, req) {
   if (url === '/api/ftp/stop' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl stop vsftpd 2>/dev/null || sudo systemctl stop proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
+      execSync('sudo systemctl stop vsftpd proftpd 2>/dev/null; sudo systemctl disable vsftpd proftpd 2>/dev/null', { encoding: 'utf-8', timeout: 10000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -3397,7 +3397,7 @@ function handleNfs(url, method, body, req) {
   if (url === '/api/nfs/start' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl start nfs-server 2>/dev/null || sudo systemctl start nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
+      execSync('sudo systemctl enable nfs-server nfs-kernel-server 2>/dev/null; sudo systemctl start nfs-server 2>/dev/null || sudo systemctl start nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -3405,7 +3405,7 @@ function handleNfs(url, method, body, req) {
   if (url === '/api/nfs/stop' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl stop nfs-server 2>/dev/null || sudo systemctl stop nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
+      execSync('sudo systemctl stop nfs-server nfs-kernel-server 2>/dev/null; sudo systemctl disable nfs-server nfs-kernel-server 2>/dev/null', { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) { return { error: 'Failed', detail: err.message }; }
   }
@@ -4119,7 +4119,7 @@ function handleSmb(url, method, body, req) {
         run('sudo cp /tmp/nimbus-smb.conf /etc/samba/smb.conf');
       } catch {}
       
-      execSync('sudo systemctl start smbd nmbd 2>/dev/null || sudo systemctl start smbd 2>/dev/null', 
+      execSync('sudo systemctl enable smbd nmbd 2>/dev/null; sudo systemctl start smbd nmbd 2>/dev/null || sudo systemctl start smbd 2>/dev/null', 
         { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) {
@@ -4131,7 +4131,7 @@ function handleSmb(url, method, body, req) {
   if (url === '/api/smb/stop' && method === 'POST') {
     if (session.role !== 'admin') return { error: 'Admin required' };
     try {
-      execSync('sudo systemctl stop smbd nmbd 2>/dev/null || sudo systemctl stop smbd 2>/dev/null', 
+      execSync('sudo systemctl stop smbd nmbd 2>/dev/null; sudo systemctl disable smbd nmbd 2>/dev/null', 
         { encoding: 'utf-8', timeout: 15000 });
       return { ok: true };
     } catch (err) {
