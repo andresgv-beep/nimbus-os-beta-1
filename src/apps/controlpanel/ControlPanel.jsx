@@ -806,7 +806,7 @@ function UpdatesPage() {
   };
 
   const applyUpdate = async () => {
-    if (!confirm('Apply update? NimbusOS will restart and you may lose connection briefly.')) return;
+    if (!confirm('Apply update? This may take a minute.')) return;
     setUpdating(true);
     setError('');
     setSuccess('');
@@ -816,25 +816,62 @@ function UpdatesPage() {
       if (data.error) {
         setError(data.error);
         setUpdating(false);
-      } else {
-        setSuccess('Update started! NimbusOS is restarting...');
-        // Poll for server to come back
-        setTimeout(() => {
-          const poll = setInterval(async () => {
+        return;
+      }
+      
+      setSuccess('Updating... please wait.');
+      
+      // Poll update status every 3 seconds
+      const poll = setInterval(async () => {
+        try {
+          const r = await fetch('/api/system/update/status', { headers });
+          if (!r.ok) throw new Error();
+          const status = await r.json();
+          
+          if (status.done) {
+            clearInterval(poll);
+            
+            if (status.type === 'frontend') {
+              // Frontend only — auto reload after brief message
+              setSuccess(`Updated to v${status.new}. Reloading...`);
+              setTimeout(() => window.location.reload(), 1500);
+            } else {
+              // Full restart — server will go down, poll until it comes back
+              setSuccess(`Updated to v${status.new}. Service restarting...`);
+              const waitForServer = setInterval(async () => {
+                try {
+                  const check = await fetch('/api/auth/status');
+                  if (check.ok) {
+                    clearInterval(waitForServer);
+                    setSuccess(`Updated to v${status.new}. Reloading...`);
+                    setTimeout(() => window.location.reload(), 1000);
+                  }
+                } catch {}
+              }, 2000);
+              setTimeout(() => clearInterval(waitForServer), 120000);
+            }
+          }
+        } catch {
+          // Server might be restarting — switch to comeback polling
+          clearInterval(poll);
+          setSuccess('Service restarting... waiting for reconnection.');
+          const waitForServer = setInterval(async () => {
             try {
-              const r = await fetch('/api/auth/status');
-              if (r.ok) {
-                clearInterval(poll);
-                setUpdating(false);
-                setSuccess('Update complete! Reload the page to see changes.');
-                setInfo(null);
+              const check = await fetch('/api/auth/status');
+              if (check.ok) {
+                clearInterval(waitForServer);
+                setSuccess('Update complete! Reloading...');
+                setTimeout(() => window.location.reload(), 1000);
               }
             } catch {}
-          }, 3000);
-          // Stop polling after 2 minutes
-          setTimeout(() => clearInterval(poll), 120000);
-        }, 5000);
-      }
+          }, 2000);
+          setTimeout(() => { clearInterval(waitForServer); setUpdating(false); setError('Timeout waiting for server'); }, 120000);
+        }
+      }, 3000);
+      
+      // Safety timeout
+      setTimeout(() => clearInterval(poll), 120000);
+      
     } catch {
       setError('Failed to start update');
       setUpdating(false);
@@ -883,7 +920,8 @@ function UpdatesPage() {
           </button>
           {info && info.updateAvailable && (
             <button className={styles.btnPrimary} onClick={applyUpdate} disabled={updating}
-              style={{ background: 'var(--accent, #f59e0b)' }}>
+              style={{ background: 'var(--accent, #f59e0b)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {updating && <span style={{ width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />}
               {updating ? 'Updating...' : 'Install Update'}
             </button>
           )}
