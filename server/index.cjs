@@ -7994,8 +7994,13 @@ server.listen(PORT, '0.0.0.0', () => {
   Object.keys(routes).forEach(r => console.log(`    GET ${r}`));
   console.log(`\n  Auto-detecting hardware...`);
 
-  // ── Sync nginx HTTPS proxy with actual port ──
+  // ── Ensure nginx is running and sync HTTPS proxy with actual port ──
   try {
+    const nginxActive = run('systemctl is-active nginx 2>/dev/null');
+    if (!nginxActive || nginxActive.trim() !== 'active') {
+      run('sudo systemctl start nginx 2>/dev/null');
+      console.log('    Nginx was stopped — started automatically');
+    }
     const nginxConf = '/etc/nginx/sites-available/nimbusos-https.conf';
     if (fs.existsSync(nginxConf)) {
       let conf = fs.readFileSync(nginxConf, 'utf-8');
