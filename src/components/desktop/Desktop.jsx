@@ -9,7 +9,7 @@ import styles from './Desktop.module.css';
 
 export default function Desktop() {
   const { windows, openWindow } = useWindows();
-  const { showDesktopIcons, wallpaper } = useTheme();
+  const { showDesktopIcons, wallpaper, prefsLoaded } = useTheme();
   const { show } = useContextMenu();
 
   const handleContextMenu = (e) => {
@@ -27,6 +27,16 @@ export default function Desktop() {
       { label: 'About NimbusOS v0.1.0', icon: <Icon name="check" size={16} /> },
     ]);
   };
+
+  // Show brief loading screen until user preferences are loaded from server
+  if (!prefsLoaded) {
+    return (
+      <div className={styles.desktop} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className={styles.surface} />
+        <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: '14px', zIndex: 1 }}>Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className={`${styles.desktop} ${styles.padTop}`} onContextMenu={handleContextMenu}>
