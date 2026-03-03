@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@context';
 import styles from './ControlPanel.module.css';
 
@@ -9,8 +9,11 @@ export default function PortalPage() {
   const [httpPort, setHttpPort] = useState('');
   const [httpsPort, setHttpsPort] = useState('');
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [countdown, setCountdown] = useState(0);
   const [result, setResult] = useState(null);
   const [dirty, setDirty] = useState(false);
+  const timerRef = useRef(null);
 
   const headers = { 'Authorization': `Bearer ${token}` };
   const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
@@ -29,34 +32,94 @@ export default function PortalPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  const save = async () => {
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  const applyAndRestart = async () => {
+    const newPort = parseInt(httpPort);
+    const portChanged = newPort !== (data?.httpPort || 5000);
+
     setSaving(true);
     setResult(null);
+
     try {
       const r = await fetch('/api/portal/config', {
         method: 'POST',
         headers: jsonHeaders,
-        body: JSON.stringify({ httpPort: parseInt(httpPort), httpsPort: parseInt(httpsPort) }),
+        body: JSON.stringify({ httpPort: newPort, httpsPort: parseInt(httpsPort) }),
       });
       const d = await r.json();
-      setResult(d);
+      if (d.error) { setResult(d); setSaving(false); return; }
       setDirty(false);
+
+      if (!portChanged) {
+        setResult({ ok: true, message: 'Configuration saved.' });
+        setSaving(false);
+        return;
+      }
+
+      // Restart the service
+      setRestarting(true);
+      setSaving(false);
+      setCountdown(15);
+
+      fetch('/api/system/reboot-service', {
+        method: 'POST',
+        headers: jsonHeaders,
+      }).catch(() => {});
+
+      let seconds = 15;
+      timerRef.current = setInterval(() => {
+        seconds--;
+        setCountdown(seconds);
+        if (seconds <= 0) {
+          clearInterval(timerRef.current);
+          const proto = window.location.protocol;
+          const host = window.location.hostname;
+          window.location.href = `${proto}//${host}:${newPort}`;
+        }
+        if (seconds <= 10 && seconds % 2 === 0) {
+          fetch(`${window.location.protocol}//${window.location.hostname}:${newPort}/api/uptime`)
+            .then(r => { if (r.ok) { clearInterval(timerRef.current); window.location.href = `${window.location.protocol}//${window.location.hostname}:${newPort}`; } })
+            .catch(() => {});
+        }
+      }, 1000);
+
     } catch (e) {
       setResult({ error: e.message });
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div>;
 
   const currentPort = data?.httpPort || 5000;
 
+  if (restarting) {
+    return (
+      <div>
+        <h3 className={styles.title}>Web Portal</h3>
+        <div style={{ padding: '60px 20px', textAlign: 'center' }}>
+          <div style={{ width: 48, height: 48, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', margin: '0 auto 20px', animation: 'spin 1s linear infinite' }} />
+          <div style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-medium)', color: 'var(--text-primary)', marginBottom: 8 }}>
+            Restarting NimbusOS...
+          </div>
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 16 }}>
+            Switching to port {httpPort}. Reconnecting in {countdown}s...
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)', color: 'var(--accent)', padding: '8px 16px', background: 'rgba(74,144,164,0.06)', borderRadius: 'var(--radius)', display: 'inline-block' }}>
+            {window.location.protocol}//{window.location.hostname}:{httpPort}
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <h3 className={styles.title}>Web Portal</h3>
       <p className={styles.desc} style={{ marginBottom: 16 }}>
         Configure the ports used to access NimbusOS web interface.
-        Changes require a service restart to take effect.
       </p>
 
       <div className={styles.tableCard} style={{ padding: 20 }}>
@@ -66,20 +129,16 @@ export default function PortalPage() {
         <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
           <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(74,144,164,0.06)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTP</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-              :{currentPort}
-            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>:{currentPort}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
               http://{window.location.hostname}:{currentPort}
             </div>
           </div>
           <div style={{ flex: 1, padding: '12px 16px', background: 'rgba(76,175,80,0.06)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTPS</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>
-              :{data?.httpsPort || 5001}
-            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', fontWeight: 600 }}>:{data?.httpsPort || 5001}</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-              {data?.httpsEnabled ? '🟢 Enabled' : '⚪ Not configured'}
+              {data?.httpsEnabled ? 'Enabled' : 'Not configured'}
             </div>
           </div>
         </div>
@@ -93,9 +152,7 @@ export default function PortalPage() {
             <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTP Port</label>
             <input
               className={styles.input}
-              type="number"
-              min="1"
-              max="65535"
+              type="number" min="1" max="65535"
               value={httpPort}
               onChange={e => { setHttpPort(e.target.value); setDirty(true); }}
               style={{ fontFamily: 'var(--font-mono)' }}
@@ -106,9 +163,7 @@ export default function PortalPage() {
             <label style={{ display: 'block', fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginBottom: 4 }}>HTTPS Port</label>
             <input
               className={styles.input}
-              type="number"
-              min="1"
-              max="65535"
+              type="number" min="1" max="65535"
               value={httpsPort}
               onChange={e => { setHttpsPort(e.target.value); setDirty(true); }}
               style={{ fontFamily: 'var(--font-mono)' }}
@@ -124,8 +179,8 @@ export default function PortalPage() {
             </span>
           )}
           <div style={{ marginLeft: 'auto' }}>
-            <button className={styles.actionBtn} onClick={save} disabled={saving || !dirty}>
-              {saving ? 'Saving…' : 'Save Ports'}
+            <button className={styles.actionBtn} onClick={applyAndRestart} disabled={saving || !dirty}>
+              {saving ? 'Saving...' : parseInt(httpPort) !== currentPort ? 'Apply & Restart' : 'Save'}
             </button>
           </div>
         </div>
@@ -139,15 +194,9 @@ export default function PortalPage() {
           fontSize: 'var(--text-sm)',
         }}>
           {result.ok ? (
-            <>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>✅ Port configuration saved</div>
-              <div style={{ color: 'var(--text-muted)' }}>{result.message}</div>
-              <div style={{ marginTop: 8, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--accent-amber)' }}>
-                sudo systemctl restart nimbusos
-              </div>
-            </>
+            <div style={{ color: 'var(--accent-green)' }}>{result.message}</div>
           ) : (
-            <div style={{ color: 'var(--accent-red)' }}>❌ {result.error}</div>
+            <div style={{ color: 'var(--accent-red)' }}>{result.error}</div>
           )}
         </div>
       )}
@@ -157,8 +206,8 @@ export default function PortalPage() {
         color: 'var(--text-secondary)', background: 'var(--bg-card)',
         border: '1px solid var(--border)', borderRadius: 'var(--radius)', lineHeight: 1.5,
       }}>
-        💡 After changing ports, NimbusOS needs to be restarted. You will need to reconnect
-        using the new port. Common ports: 80 (HTTP standard), 443 (HTTPS standard), 8080, 8443.
+        Changing the HTTP port will automatically restart NimbusOS and redirect you to the new address.
+        The HTTPS port for remote access is configured separately in Remote Access.
         Avoid ports already in use by other services.
       </div>
     </div>
