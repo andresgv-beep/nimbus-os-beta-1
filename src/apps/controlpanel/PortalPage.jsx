@@ -155,7 +155,7 @@ export default function PortalPage() {
               type="text" inputMode="numeric" pattern="[0-9]*"
               value={httpPort}
               onChange={e => { const v = e.target.value.replace(/\D/g,''); setHttpPort(v); setDirty(true); }}
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', textAlign: 'center' }}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)' }}
             />
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Default: 5000</div>
           </div>
@@ -166,7 +166,7 @@ export default function PortalPage() {
               type="text" inputMode="numeric" pattern="[0-9]*"
               value={httpsPort}
               onChange={e => { const v = e.target.value.replace(/\D/g,''); setHttpsPort(v); setDirty(true); }}
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)', textAlign: 'center' }}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-lg)' }}
             />
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Default: 5001</div>
           </div>
