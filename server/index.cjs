@@ -4981,14 +4981,47 @@ function handleNativeApps(url, method, body, req) {
     if (!appDef) return { error: 'Unknown app' };
     if (!appDef.installCommand) return { error: 'No install command defined' };
     
+    // Run install asynchronously so it doesn't block the server
+    const logDir = '/var/log/nimbusos';
+    if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+    
+    const statusFile = path.join(logDir, `install-${appId}.json`);
+    // Mark as installing
+    fs.writeFileSync(statusFile, JSON.stringify({ status: 'installing', appId, startedAt: new Date().toISOString() }));
+    
+    const { spawn } = require('child_process');
+    const logFile = fs.openSync(path.join(logDir, `install-${appId}.log`), 'w');
+    const child = spawn('bash', ['-c', appDef.installCommand], {
+      detached: true,
+      stdio: ['ignore', logFile, logFile],
+    });
+    
+    child.on('close', (code) => {
+      fs.closeSync(logFile);
+      if (code === 0) {
+        registerNativeApp({ id: appId, name: appDef.name, icon: appDef.icon, color: appDef.color, port: appDef.port, isDesktop: appDef.isDesktop || false, nimbusApp: appDef.nimbusApp || null });
+        fs.writeFileSync(statusFile, JSON.stringify({ status: 'done', appId, code: 0 }));
+      } else {
+        fs.writeFileSync(statusFile, JSON.stringify({ status: 'error', appId, code }));
+      }
+    });
+    child.unref();
+    
+    return { ok: true, appId, async: true, message: 'Installation started' };
+  }
+  
+  // GET /api/native-apps/:id/install-status — check async install progress
+  const installStatusMatch = url.match(/^\/api\/native-apps\/([a-zA-Z0-9_-]+)\/install-status$/);
+  if (installStatusMatch && method === 'GET') {
+    if (!session) return { error: 'Not authenticated' };
+    const appId = installStatusMatch[1];
+    const statusFile = `/var/log/nimbusos/install-${appId}.json`;
     try {
-      const log = execSync(appDef.installCommand, { encoding: 'utf-8', timeout: 300000, stdio: 'pipe' });
-      // Register as installed
-      registerNativeApp({ id: appId, name: appDef.name, icon: appDef.icon, color: appDef.color, port: appDef.port, isDesktop: appDef.isDesktop || false, nimbusApp: appDef.nimbusApp || null });
-      return { ok: true, appId, log };
-    } catch (err) {
-      return { error: 'Installation failed', detail: err.stderr || err.message };
-    }
+      if (fs.existsSync(statusFile)) {
+        return JSON.parse(fs.readFileSync(statusFile, 'utf-8'));
+      }
+    } catch {}
+    return { status: 'unknown' };
   }
   
   // POST /api/native-apps/:id/uninstall — uninstall a native app
