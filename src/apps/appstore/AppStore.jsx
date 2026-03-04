@@ -330,15 +330,13 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
           const st = await sr.json();
 
           if (st.status === 'installing') {
-            // Simulate progress
-            setProgress(p => Math.min(p + 8, 85));
+            setProgress(p => Math.min(p + 5, 85));
             setProgressMsg('Installing and configuring...');
           } else if (st.status === 'done') {
             clearInterval(poll);
             setProgress(90);
             setProgressMsg('Configuring for NimbusOS...');
 
-            // Configure if download-station
             if (app.nimbusApp === 'downloads') {
               try {
                 await fetch('/api/downloads/configure', {
@@ -355,21 +353,16 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
             setInstalling(false);
           } else if (st.status === 'error') {
             clearInterval(poll);
-            setError('Installation failed (exit code ' + st.code + '). Check logs for details.');
+            setError(`Installation failed (exit code ${st.code}). Check /var/log/nimbusos/ for details.`);
             setInstalling(false);
           }
         } catch {}
       }, 2500);
 
-      // Safety timeout
       setTimeout(() => {
         clearInterval(poll);
-        if (!done) {
-          setError('Installation timed out');
-          setInstalling(false);
-        }
+        if (!done) { setError('Installation timed out.'); setInstalling(false); }
       }, 300000);
-
     } catch (err) {
       setError(err.message);
       setInstalling(false);
@@ -380,7 +373,7 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
     <div className={styles.wizardOverlay}>
       <div className={styles.wizardBox}>
         <div className={styles.wizardHeader}>
-          <h3>Install {app.name}</h3>
+          <h3>{done ? `${app.name} Installed` : `Install ${app.name}`}</h3>
           {!installing && <button className={styles.wizardClose} onClick={onClose}>&times;</button>}
         </div>
 
@@ -390,50 +383,50 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
               <div className={styles.installingIcon}>
                 {isIconUrl ? (
                   <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
-                ) : '✓'}
+                ) : <span style={{fontSize:32}}>✓</span>}
               </div>
-              <h4>{app.name} installed successfully</h4>
-              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 8 }}>
-                {app.nimbusApp 
-                  ? 'You can now open it from the desktop or App Store.'
-                  : `Access ${app.name} at port ${app.port || '—'}.`}
+              <h4>{app.name} is ready</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 4 }}>
+                {app.nimbusApp
+                  ? `Open ${app.name} from the desktop or launcher.`
+                  : `Service is running on port ${app.port || '—'}.`}
               </p>
             </div>
           ) : !installing ? (
             <div>
-              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 16 }}>
-                <div className={styles.installingIcon} style={{ width: 48, height: 48 }}>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 }}>
+                <div className={styles.installingIcon} style={{ width: 56, height: 56 }}>
                   {isIconUrl ? (
                     <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
-                  ) : '📦'}
+                  ) : <span style={{fontSize:28}}>📦</span>}
                 </div>
                 <div>
-                  <h4 style={{ margin: 0 }}>{app.name}</h4>
+                  <h4 style={{ margin: 0, fontSize: '1.05rem' }}>{app.name}</h4>
                   <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{app.description}</p>
                 </div>
               </div>
 
-              <div className={styles.confirmDetails}>
+              <div className={styles.confirmBox}>
                 <div className={styles.confirmRow}>
-                  <span>Type:</span>
-                  <code>Native service (no Docker)</code>
+                  <span>Type</span>
+                  <code>Native (installed directly on system)</code>
                 </div>
                 {app.port && (
                   <div className={styles.confirmRow}>
-                    <span>Port:</span>
+                    <span>Port</span>
                     <code>{app.port}</code>
                   </div>
                 )}
                 {app.nimbusApp && (
                   <div className={styles.confirmRow}>
-                    <span>App:</span>
-                    <code>Opens as {app.name} in NimbusOS</code>
+                    <span>Opens as</span>
+                    <code>{app.name} app in NimbusOS</code>
                   </div>
                 )}
               </div>
 
               <p className={styles.confirmNote}>
-                This will install the service directly on the system using apt. No Docker required.
+                This will install {app.name} as a native Linux service using apt. No Docker required.
               </p>
 
               {error && <div className={styles.wizardError}>{error}</div>}
@@ -443,7 +436,7 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
               <div className={styles.installingIcon}>
                 {isIconUrl ? (
                   <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
-                ) : '📦'}
+                ) : <span style={{fontSize:28}}>📦</span>}
               </div>
               <h4>Installing {app.name}...</h4>
               <div className={styles.progressBarLarge}>
@@ -461,7 +454,13 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
             <button className={styles.btnSecondary} onClick={onClose}>{done ? 'Close' : 'Cancel'}</button>
             <div style={{ flex: 1 }} />
             {done ? (
-              <button className={styles.btnPrimary} onClick={() => { onInstalled(app.id); onClose(); }}>
+              <button className={styles.btnPrimary} onClick={() => {
+                onInstalled(app.id);
+                if (app.nimbusApp) {
+                  window.dispatchEvent(new CustomEvent('nimbus-open-app', { detail: { appId: app.nimbusApp } }));
+                }
+                onClose();
+              }}>
                 {app.nimbusApp ? 'Open App' : 'Done'}
               </button>
             ) : (
@@ -473,6 +472,7 @@ function NativeInstallWizard({ app, onClose, onInstalled, token }) {
     </div>
   );
 }
+
 
 function ContainerInstallWizard({ app, onClose, onInstalled, token, dockerPath }) {
   const [installing, setInstalling] = useState(false);
