@@ -288,6 +288,192 @@ function DockerInstallWizard({ onClose, onInstalled, token, users }) {
 /* ═══════════════════════════════════════════════════════════
    CONTAINER/STACK INSTALL WIZARD (for apps)
    ═══════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════
+   NATIVE APP INSTALL WIZARD
+   ═══════════════════════════════════════════════════════════ */
+function NativeInstallWizard({ app, onClose, onInstalled, token }) {
+  const [installing, setInstalling] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [progressMsg, setProgressMsg] = useState('');
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+
+  const isIconUrl = app.icon && app.icon.startsWith('http');
+  const nativeId = app.nativeId || app.id;
+  const headers = { 'Authorization': `Bearer ${token}` };
+
+  const handleInstall = async () => {
+    setInstalling(true);
+    setError('');
+    setProgress(5);
+    setProgressMsg('Starting installation...');
+
+    try {
+      const res = await fetch(`/api/native-apps/${nativeId}/install`, {
+        method: 'POST', headers,
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        setError(data.error || 'Installation failed');
+        setInstalling(false);
+        return;
+      }
+
+      setProgress(15);
+      setProgressMsg('Downloading packages...');
+
+      // Poll for completion
+      const poll = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/native-apps/${nativeId}/install-status`, { headers });
+          const st = await sr.json();
+
+          if (st.status === 'installing') {
+            // Simulate progress
+            setProgress(p => Math.min(p + 8, 85));
+            setProgressMsg('Installing and configuring...');
+          } else if (st.status === 'done') {
+            clearInterval(poll);
+            setProgress(90);
+            setProgressMsg('Configuring for NimbusOS...');
+
+            // Configure if download-station
+            if (app.nimbusApp === 'downloads') {
+              try {
+                await fetch('/api/downloads/configure', {
+                  method: 'POST',
+                  headers: { ...headers, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ downloadDir: '/nimbus/downloads' }),
+                });
+              } catch {}
+            }
+
+            setProgress(100);
+            setProgressMsg('Installation complete!');
+            setDone(true);
+            setInstalling(false);
+          } else if (st.status === 'error') {
+            clearInterval(poll);
+            setError('Installation failed (exit code ' + st.code + '). Check logs for details.');
+            setInstalling(false);
+          }
+        } catch {}
+      }, 2500);
+
+      // Safety timeout
+      setTimeout(() => {
+        clearInterval(poll);
+        if (!done) {
+          setError('Installation timed out');
+          setInstalling(false);
+        }
+      }, 300000);
+
+    } catch (err) {
+      setError(err.message);
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div className={styles.wizardOverlay}>
+      <div className={styles.wizardBox}>
+        <div className={styles.wizardHeader}>
+          <h3>Install {app.name}</h3>
+          {!installing && <button className={styles.wizardClose} onClick={onClose}>&times;</button>}
+        </div>
+
+        <div className={styles.wizardBody}>
+          {done ? (
+            <div className={styles.installingSection}>
+              <div className={styles.installingIcon}>
+                {isIconUrl ? (
+                  <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
+                ) : '✓'}
+              </div>
+              <h4>{app.name} installed successfully</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)', marginTop: 8 }}>
+                {app.nimbusApp 
+                  ? 'You can now open it from the desktop or App Store.'
+                  : `Access ${app.name} at port ${app.port || '—'}.`}
+              </p>
+            </div>
+          ) : !installing ? (
+            <div>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 16 }}>
+                <div className={styles.installingIcon} style={{ width: 48, height: 48 }}>
+                  {isIconUrl ? (
+                    <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
+                  ) : '📦'}
+                </div>
+                <div>
+                  <h4 style={{ margin: 0 }}>{app.name}</h4>
+                  <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{app.description}</p>
+                </div>
+              </div>
+
+              <div className={styles.confirmDetails}>
+                <div className={styles.confirmRow}>
+                  <span>Type:</span>
+                  <code>Native service (no Docker)</code>
+                </div>
+                {app.port && (
+                  <div className={styles.confirmRow}>
+                    <span>Port:</span>
+                    <code>{app.port}</code>
+                  </div>
+                )}
+                {app.nimbusApp && (
+                  <div className={styles.confirmRow}>
+                    <span>App:</span>
+                    <code>Opens as {app.name} in NimbusOS</code>
+                  </div>
+                )}
+              </div>
+
+              <p className={styles.confirmNote}>
+                This will install the service directly on the system using apt. No Docker required.
+              </p>
+
+              {error && <div className={styles.wizardError}>{error}</div>}
+            </div>
+          ) : (
+            <div className={styles.installingSection}>
+              <div className={styles.installingIcon}>
+                {isIconUrl ? (
+                  <img src={app.icon} alt={app.name} className={styles.installingIconImg} />
+                ) : '📦'}
+              </div>
+              <h4>Installing {app.name}...</h4>
+              <div className={styles.progressBarLarge}>
+                <div className={styles.progressFillLarge} style={{ width: `${progress}%` }} />
+              </div>
+              <span className={styles.progressText}>{progress}%</span>
+              {progressMsg && <span className={styles.progressMsg}>{progressMsg}</span>}
+              {error && <div className={styles.wizardError}>{error}</div>}
+            </div>
+          )}
+        </div>
+
+        {!installing && (
+          <div className={styles.wizardFooter}>
+            <button className={styles.btnSecondary} onClick={onClose}>{done ? 'Close' : 'Cancel'}</button>
+            <div style={{ flex: 1 }} />
+            {done ? (
+              <button className={styles.btnPrimary} onClick={() => { onInstalled(app.id); onClose(); }}>
+                {app.nimbusApp ? 'Open App' : 'Done'}
+              </button>
+            ) : (
+              <button className={styles.btnPrimary} onClick={handleInstall}>Install</button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ContainerInstallWizard({ app, onClose, onInstalled, token, dockerPath }) {
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -767,8 +953,8 @@ export default function AppStore() {
     if (app.id === 'docker') {
       setShowDockerWizard(true);
     } else if (app.native) {
-      // Native app install — no Docker needed
-      handleNativeInstall(app);
+      // Native app — show install wizard
+      setNativeInstallingApp(app);
     } else {
       // Check permission
       if (!dockerStatus.hasPermission) {
@@ -779,36 +965,8 @@ export default function AppStore() {
     }
   };
   
+  const [nativeInstallingApp, setNativeInstallingApp] = useState(null);
   const [nativeInstalling, setNativeInstalling] = useState(null);
-  
-  const handleNativeInstall = async (app) => {
-    if (!confirm(`Install ${app.name}? This will download and configure the service.`)) return;
-    setNativeInstalling(app.id);
-    try {
-      const nativeId = app.nativeId || app.id;
-      const res = await fetch(`/api/native-apps/${nativeId}/install`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (data.ok) {
-        // Configure if it's download-station
-        if (app.nimbusApp === 'downloads') {
-          await fetch('/api/downloads/configure', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ downloadDir: '/nimbus/downloads' }),
-          });
-        }
-        setInstalledApps(prev => [...prev, app.id]);
-      } else {
-        alert('Install failed: ' + (data.error || 'Unknown error'));
-      }
-    } catch (err) {
-      alert('Install failed: ' + err.message);
-    }
-    setNativeInstalling(null);
-  };
   
   const handleDockerInstalled = (path) => {
     setDockerStatus({ installed: true, path, hasPermission: true });
@@ -1006,6 +1164,15 @@ export default function AppStore() {
           onInstalled={handleAppInstalled}
           token={token}
           dockerPath={dockerStatus.path}
+        />
+      )}
+
+      {nativeInstallingApp && (
+        <NativeInstallWizard
+          app={nativeInstallingApp}
+          onClose={() => setNativeInstallingApp(null)}
+          onInstalled={(appId) => { setInstalledApps(prev => [...prev, appId]); }}
+          token={token}
         />
       )}
       
