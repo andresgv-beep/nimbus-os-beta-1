@@ -17,6 +17,15 @@ import mediaplayerIcon from '@icons/apps/mediaplayer.png';
 import appstoreIcon from '@icons/apps/appstore.svg';
 
 export const APP_REGISTRY = {
+  downloads: {
+    id: 'downloads',
+    title: 'Download Station',
+    color: '#B50D0D',
+    icon: 'cloud',
+    appIcon: null,
+    defaultSize: { width: 960, height: 600 },
+    category: 'system',
+  },
   files: {
     id: 'files',
     title: 'File Manager',
