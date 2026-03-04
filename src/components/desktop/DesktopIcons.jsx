@@ -1,10 +1,51 @@
-import { useState } from 'react';
-import { useWindows, useTheme } from '@context';
+import { useState, useEffect } from 'react';
+import { useWindows, useTheme, useAuth } from '@context';
 import { APP_REGISTRY, getAppMeta } from '@/apps';
 import Icon from '@icons';
 import styles from './DesktopIcons.module.css';
 
 const DESKTOP_APPS = ['files', 'storage', 'monitor', 'containers', 'network', 'vms', 'terminal', 'texteditor', 'mediaplayer', 'controlpanel', 'appstore', 'settings'];
+
+export default function DesktopIcons() {
+  const { openWindow } = useWindows();
+  const { pinnedApps, togglePin } = useTheme();
+  const { token } = useAuth();
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const [nativeAppIds, setNativeAppIds] = useState([]);
+
+  // Load native apps that have a NimbusOS app
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/native-apps', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d.apps) {
+          const ids = d.apps.filter(a => a.nimbusApp && APP_REGISTRY[a.nimbusApp]).map(a => a.nimbusApp);
+          setNativeAppIds(ids);
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  // Listen for app install events from AppStore
+  useEffect(() => {
+    const handler = () => {
+      fetch('/api/native-apps', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => {
+          if (d.apps) {
+            const ids = d.apps.filter(a => a.nimbusApp && APP_REGISTRY[a.nimbusApp]).map(a => a.nimbusApp);
+            setNativeAppIds(ids);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('nimbus-open-app', handler);
+    return () => window.removeEventListener('nimbus-open-app', handler);
+  }, [token]);
+
+  // Combine system apps + native apps (deduplicated)
+  const allDesktopApps = [...DESKTOP_APPS, ...nativeAppIds.filter(id => !DESKTOP_APPS.includes(id))];
 
 export default function DesktopIcons() {
   const { openWindow } = useWindows();
@@ -60,8 +101,9 @@ export default function DesktopIcons() {
       )}
 
       <div className={styles.grid}>
-        {DESKTOP_APPS.map(appId => {
+        {allDesktopApps.map(appId => {
           const meta = APP_REGISTRY[appId];
+          if (!meta) return null;
           return (
             <div
               key={appId}
