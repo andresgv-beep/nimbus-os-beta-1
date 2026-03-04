@@ -587,8 +587,9 @@ function NoPermissionModal({ onClose, onGoToPermissions }) {
 /* ═══════════════════════════════════════════════════════════
    APP CARD
    ═══════════════════════════════════════════════════════════ */
-function AppCard({ app, installed, onInstall, onOpen, onUninstall }) {
+function AppCard({ app, installed, onInstall, onOpen, onUninstall, nativeInstalling }) {
   const isIconUrl = app.icon && app.icon.startsWith('http');
+  const isInstalling = nativeInstalling === app.id;
   
   return (
     <div className={`${styles.appCard} ${installed ? styles.appInstalled : ''}`}>
@@ -602,33 +603,34 @@ function AppCard({ app, installed, onInstall, onOpen, onUninstall }) {
       <div className={styles.appInfo}>
         <div className={styles.appHeader}>
           <h4>{app.name}</h4>
-          {app.official && <span className={styles.badgeOfficial}>Oficial</span>}
+          {app.official && <span className={styles.badgeOfficial}>Official</span>}
+          {app.native && <span className={styles.badgeBase}>Native</span>}
           {app.isBase && <span className={styles.badgeBase}>Base</span>}
-          {installed && <span className={styles.badgeInstalled}>Instalado</span>}
+          {installed && <span className={styles.badgeInstalled}>Installed</span>}
         </div>
         <p className={styles.appDesc}>{app.description}</p>
         <div className={styles.appMeta}>
           <span className={styles.appCategory}>
             {CATEGORIES[app.category]?.icon} {CATEGORIES[app.category]?.label}
           </span>
-          {app.port && <span className={styles.appPort}>Puerto: {app.port}</span>}
+          {app.port && <span className={styles.appPort}>Port: {app.port}</span>}
         </div>
       </div>
       <div className={styles.appActions}>
         {installed ? (
           <>
-            {app.port && (
-              <button className={styles.btnOpen} onClick={() => onOpen(app)}>Abrir</button>
+            {(app.port || app.nimbusApp) && (
+              <button className={styles.btnOpen} onClick={() => onOpen(app)}>Open</button>
             )}
             {!app.isBase && (
               <button className={styles.btnSecondary} onClick={() => onUninstall(app)}>
-                Desinstalar
+                Uninstall
               </button>
             )}
           </>
         ) : (
-          <button className={styles.btnInstall} onClick={() => onInstall(app)}>
-            Instalar
+          <button className={styles.btnInstall} onClick={() => onInstall(app)} disabled={isInstalling}>
+            {isInstalling ? 'Installing...' : 'Install'}
           </button>
         )}
       </div>
@@ -700,9 +702,27 @@ export default function AppStore() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const appsData = await appsRes.json();
-      if (appsData.apps && Array.isArray(appsData.apps)) {
-        setInstalledApps(appsData.apps.map(a => a.id));
-      }
+      const dockerApps = (appsData.apps && Array.isArray(appsData.apps)) ? appsData.apps.map(a => a.id) : [];
+      
+      // Also check native apps
+      let nativeIds = [];
+      try {
+        const nativeRes = await fetch('/api/native-apps/available', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const nativeData = await nativeRes.json();
+        if (nativeData.apps) {
+          nativeIds = nativeData.apps
+            .filter(a => a.installed)
+            .map(a => {
+              // Map native app id to catalog id (e.g. transmission -> download-station)
+              if (a.id === 'transmission') return 'download-station';
+              return a.id;
+            });
+        }
+      } catch {}
+      
+      setInstalledApps([...dockerApps, ...nativeIds]);
     } catch {}
   }, [token]);
   
@@ -746,6 +766,9 @@ export default function AppStore() {
   const handleInstallClick = (app) => {
     if (app.id === 'docker') {
       setShowDockerWizard(true);
+    } else if (app.native) {
+      // Native app install — no Docker needed
+      handleNativeInstall(app);
     } else {
       // Check permission
       if (!dockerStatus.hasPermission) {
@@ -754,6 +777,37 @@ export default function AppStore() {
       }
       setInstallingApp(app);
     }
+  };
+  
+  const [nativeInstalling, setNativeInstalling] = useState(null);
+  
+  const handleNativeInstall = async (app) => {
+    if (!confirm(`Install ${app.name}? This will download and configure the service.`)) return;
+    setNativeInstalling(app.id);
+    try {
+      const nativeId = app.nativeId || app.id;
+      const res = await fetch(`/api/native-apps/${nativeId}/install`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok) {
+        // Configure if it's download-station
+        if (app.nimbusApp === 'downloads') {
+          await fetch('/api/downloads/configure', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ downloadDir: '/nimbus/downloads' }),
+          });
+        }
+        setInstalledApps(prev => [...prev, app.id]);
+      } else {
+        alert('Install failed: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Install failed: ' + err.message);
+    }
+    setNativeInstalling(null);
   };
   
   const handleDockerInstalled = (path) => {
@@ -820,7 +874,10 @@ export default function AppStore() {
   };
   
   const handleOpenApp = (app) => {
-    if (app.port) {
+    if (app.nimbusApp) {
+      // Native app — dispatch event to open NimbusOS app
+      window.dispatchEvent(new CustomEvent('nimbus-open-app', { detail: { appId: app.nimbusApp } }));
+    } else if (app.port) {
       window.open(`http://${window.location.hostname}:${app.port}`, '_blank');
     }
   };
@@ -918,6 +975,7 @@ export default function AppStore() {
                 onInstall={handleInstallClick}
                 onOpen={handleOpenApp}
                 onUninstall={handleUninstall}
+                nativeInstalling={nativeInstalling}
               />
             ))}
           </div>
