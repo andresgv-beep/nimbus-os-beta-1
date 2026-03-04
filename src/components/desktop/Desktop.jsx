@@ -1,5 +1,7 @@
 import { useWindows, useTheme } from '@context';
 import { useContextMenu } from './ContextMenu';
+import { getAppMeta } from '@/apps';
+import { useEffect } from 'react';
 import Taskbar from '@components/window/Taskbar';
 import WindowFrame from '@components/window/WindowFrame';
 import DesktopIcons from './DesktopIcons';
@@ -11,6 +13,19 @@ export default function Desktop() {
   const { windows, openWindow } = useWindows();
   const { showDesktopIcons, wallpaper, prefsLoaded } = useTheme();
   const { show } = useContextMenu();
+
+  // Listen for open-app events (from AppStore native apps)
+  useEffect(() => {
+    const handler = (e) => {
+      const appId = e.detail?.appId;
+      if (appId) {
+        const meta = getAppMeta(appId);
+        openWindow(appId, meta?.defaultSize || { width: 900, height: 600 });
+      }
+    };
+    window.addEventListener('nimbus-open-app', handler);
+    return () => window.removeEventListener('nimbus-open-app', handler);
+  }, [openWindow]);
 
   const handleContextMenu = (e) => {
     // Only trigger on the desktop surface itself, not on windows/taskbar
