@@ -383,6 +383,7 @@ function detectAllNativeApps() {
         port: def.port,
         type: 'native',
         isDesktop: def.isDesktop || false,
+        nimbusApp: def.nimbusApp || null,
         running: status.running
       });
     }
