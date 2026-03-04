@@ -11,12 +11,14 @@ import ControlPanel from './controlpanel/ControlPanel';
 import TextEditor from './texteditor/TextEditor';
 import MediaPlayer from './mediaplayer/MediaPlayer';
 import AppStore from './appstore/AppStore';
+import DownloadStation from './downloads/DownloadStation';
 import AppPlaceholder from './AppPlaceholder';
 import WebApp from './webapp/WebApp';
 import { useAuth } from '@context';
 import { HardDriveIcon } from '@icons';
 
 const APP_COMPONENTS = {
+  downloads: DownloadStation,
   files: FileManager,
   storage: StorageManager,
   monitor: SystemMonitor,
