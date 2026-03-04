@@ -13,7 +13,6 @@ export default function DesktopIcons() {
   const [ctxMenu, setCtxMenu] = useState(null);
   const [nativeAppIds, setNativeAppIds] = useState([]);
 
-  // Load native apps that have a NimbusOS app
   useEffect(() => {
     if (!token) return;
     fetch('/api/native-apps', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -27,7 +26,6 @@ export default function DesktopIcons() {
       .catch(() => {});
   }, [token]);
 
-  // Listen for app install events from AppStore
   useEffect(() => {
     const handler = () => {
       fetch('/api/native-apps', { headers: { 'Authorization': `Bearer ${token}` } })
@@ -44,13 +42,7 @@ export default function DesktopIcons() {
     return () => window.removeEventListener('nimbus-open-app', handler);
   }, [token]);
 
-  // Combine system apps + native apps (deduplicated)
   const allDesktopApps = [...DESKTOP_APPS, ...nativeAppIds.filter(id => !DESKTOP_APPS.includes(id))];
-
-export default function DesktopIcons() {
-  const { openWindow } = useWindows();
-  const { pinnedApps, togglePin } = useTheme();
-  const [ctxMenu, setCtxMenu] = useState(null);
 
   const handleOpen = (appId) => {
     const meta = getAppMeta(appId);
