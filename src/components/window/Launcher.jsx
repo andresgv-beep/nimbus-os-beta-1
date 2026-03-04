@@ -10,11 +10,13 @@ export default function Launcher({ open, onClose }) {
   const { openWindow } = useWindows();
   const { token } = useAuth();
   const [installedApps, setInstalledApps] = useState([]);
+  const [nativeApps, setNativeApps] = useState([]);
 
   // Fetch installed apps from backend
   useEffect(() => {
     if (!open || !token) return;
     
+    // Docker apps
     fetch('/api/docker/installed-apps', {
       headers: { 'Authorization': `Bearer ${token}` }
     })
@@ -22,6 +24,18 @@ export default function Launcher({ open, onClose }) {
       .then(data => {
         if (data.apps && Array.isArray(data.apps)) {
           setInstalledApps(data.apps);
+        }
+      })
+      .catch(() => {});
+    
+    // Native apps
+    fetch('/api/native-apps', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.apps && Array.isArray(data.apps)) {
+          setNativeApps(data.apps.filter(a => a.nimbusApp));
         }
       })
       .catch(() => {});
@@ -78,8 +92,22 @@ export default function Launcher({ open, onClose }) {
     isDesktop: app.isDesktop || false
   }));
 
-  // All apps combined
-  const allApps = [...systemApps, ...dockerApps];
+  // Native apps (have a NimbusOS app component)
+  const nativeAppItems = nativeApps
+    .filter(app => app.nimbusApp && APP_REGISTRY[app.nimbusApp])
+    .map(app => ({
+      id: app.nimbusApp,
+      ...APP_REGISTRY[app.nimbusApp],
+      isSystem: true,
+    }));
+
+  // All apps combined (deduplicate by id)
+  const seen = new Set();
+  const allApps = [...systemApps, ...nativeAppItems, ...dockerApps].filter(app => {
+    if (seen.has(app.id)) return false;
+    seen.add(app.id);
+    return true;
+  });
 
   return (
     <>
