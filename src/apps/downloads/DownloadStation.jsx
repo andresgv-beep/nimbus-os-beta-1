@@ -278,17 +278,35 @@ export default function DownloadStation() {
       const r = await fetch('/api/native-apps/transmission/install', { method: 'POST', headers });
       const d = await r.json();
       if (d.ok) {
-        setConfiguring(true);
-        // Configure for NimbusOS
-        await fetch('/api/downloads/configure', {
-          method: 'POST', headers: jsonHeaders,
-          body: JSON.stringify({ downloadDir: shares[0]?.path || '/nimbus/downloads' }),
-        });
-        setConfiguring(false);
-        checkStatus();
+        // Poll for install completion
+        const poll = setInterval(async () => {
+          try {
+            const sr = await fetch('/api/native-apps/transmission/install-status', { headers });
+            const st = await sr.json();
+            if (st.status === 'done') {
+              clearInterval(poll);
+              setConfiguring(true);
+              await fetch('/api/downloads/configure', {
+                method: 'POST', headers: jsonHeaders,
+                body: JSON.stringify({ downloadDir: shares[0]?.path || '/nimbus/downloads' }),
+              });
+              setConfiguring(false);
+              setInstalling(false);
+              checkStatus();
+            } else if (st.status === 'error') {
+              clearInterval(poll);
+              setInstalling(false);
+              alert('Installation failed. Check logs for details.');
+            }
+          } catch {}
+        }, 3000);
+        setTimeout(() => { clearInterval(poll); setInstalling(false); }, 300000);
+      } else {
+        setInstalling(false);
       }
-    } catch {}
-    setInstalling(false);
+    } catch {
+      setInstalling(false);
+    }
   };
 
   // Start Transmission
