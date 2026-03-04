@@ -979,7 +979,7 @@ export default function AppStore() {
   const handleUninstall = async (app) => {
     // Docker uninstall — special case
     if (app.id === 'docker') {
-      if (!confirm('¿Desinstalar Docker? Se eliminarán TODOS los contenedores y datos de Docker.')) return;
+      if (!confirm('Uninstall Docker? All containers and Docker data will be removed.')) return;
       try {
         const res = await fetch('/api/docker/uninstall', {
           method: 'POST',
@@ -993,22 +993,40 @@ export default function AppStore() {
       return;
     }
     
-    if (!confirm(`¿Desinstalar ${app.name}?`)) return;
+    if (!confirm(`Uninstall ${app.name}?`)) return;
     
+    // Native app uninstall
+    if (app.native) {
+      try {
+        const nativeId = app.nativeId || app.id;
+        const res = await fetch(`/api/native-apps/${nativeId}/uninstall`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setInstalledApps(prev => prev.filter(id => id !== app.id));
+        } else {
+          alert('Uninstall failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Uninstall failed: ' + err.message);
+      }
+      return;
+    }
+    
+    // Docker app uninstall
     try {
-      // Check if it's a stack (has compose in catalog)
       const catalogApp = catalog[app.id];
       const isStack = catalogApp?.compose || app.compose;
       
       let res;
       if (isStack) {
-        // Delete stack
         res = await fetch(`/api/docker/stack/${app.id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
       } else {
-        // Delete simple container
         res = await fetch(`/api/docker/container/${app.id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
@@ -1017,17 +1035,16 @@ export default function AppStore() {
       
       const data = await res.json();
       if (!data.error) {
-        // Also unregister from installed-apps
         await fetch(`/api/installed-apps/${app.id}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         });
         setInstalledApps(prev => prev.filter(id => id !== app.id));
       } else {
-        alert(`Error al desinstalar: ${data.error}`);
+        alert('Uninstall error: ' + data.error);
       }
     } catch (err) {
-      alert(`Error al desinstalar: ${err.message}`);
+      alert('Uninstall error: ' + err.message);
     }
   };
   
